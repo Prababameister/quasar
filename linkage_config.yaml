@@ -1,96 +1,76 @@
 # Linkage Configuration
 # ─────────────────────
-# points:
-#   x, y       optional — omit or leave out for free joints (defaults to 0.0)
-#              For fixed points, x and y must be set.
-#   fixed      true = ground pivot, never moves
-#
-# edges:
-#   from/to    point names
-#   length     rigid link length in mm
-#
-# inputs:
-#   name       slider label
-#   pivot      fixed end of the driven link (must be a fixed point)
-#   point      the end that moves when you drag the slider
-#   angle_deg  starting angle in degrees (world frame)
-#
-# angle_constraints — two forms:
-#
-#   Fixed angle from world +X axis:
-#     edge: [A, B]       the link whose angle is constrained
-#     angle_deg: 45.0    angle of A→B from horizontal
-#
-#   Relative angle between two edges sharing a point:
-#     edge1: [A, B]
-#     edge2: [A, C]      both edges must share point A
-#     angle_deg: 60.0    angle from edge1 to edge2
+# end_effector: name of the point treated as the IK target (default: D)
+end_effector: D
+
+# viewport: canvas bounds in mm (adjust to fit your mechanism)
+viewport:
+  xmin: -50
+  xmax: 250
+  ymin: -200
+  ymax: 150
+
+# ik_config: gradient descent IK tuning
+ik_config:
+  tolerance_mm:   1.0      # stop when |error| < this
+  max_iterations: 2000
+  learning_rate:  1.0      # initial step size in degrees
+  finite_diff_h:  0.01     # perturbation for numerical gradient (degrees)
+
+# workspace_config: precomputation settings
+workspace_config:
+  step_deg: 2.0            # angular step size for workspace sweep
 
 points:
   O:
     x: 0.0
     y: 0.0
     fixed: true
-
   Q:
     x: 23.0
     y: 25.0
     fixed: true
-
-  A:              # x/y are initial-guess hints for the solver
+  A:
     x: 17.87
     y: 17.87
-
   B:
     x: 30.0
     y: 40.0
-
   C:
     x: 200.0
     y: -80.0
-
-  D:
-    x: 40.0
-    y: -110.0
-
   P1:
     x: 90.0
     y: 50.0
-
-  P2:             # no x/y — solver will figure it out from constraints
+  P2:
     x: 110.0
     y: 20.0
-
+  D:
+    x: 200.0
+    y: -80.0
 
 edges:
   - from: O
     to: A
     length: 25.298
-
   - from: Q
     to: B
     length: 27.093
-
   - from: A
     to: B
     length: 31.955
-
   - from: Q
     to: P1
     length: 113.748
-
   - from: Q
     to: C
     length: 31.607
-
   - from: C
     to: P2
     length: 113.748
-
   - from: P1
     to: P2
     length: 31.305
-
   - from: P1
     to: D
     length: 137.733
@@ -99,19 +79,17 @@ inputs:
   - name: theta1
     pivot: O
     point: A
-    angle_deg: 90.0
-
+    angle_deg: 45.0
+    min_deg: 90.0
+    max_deg:  270.0
   - name: theta_c
     pivot: Q
     point: P1
     angle_deg: -30.0
+    min_deg: -90.0
+    max_deg:  90.0
 
 angle_constraints:
   - edge1: [B, Q]
     edge2: [Q, C]
     angle_deg: 90.0
-
-  # Example 2 — fix the A→B link at 90 degrees from world horizontal
-  # (uncomment to use — will conflict with the inputs above if over-constrained)
-  # - edge: [A, B]
-  #   angle_deg: 90.0
