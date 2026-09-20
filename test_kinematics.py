@@ -57,30 +57,32 @@ check("fk_leg reports side", fk_r["side"] == "right" and fk_l["side"] == "left")
 # ── 2. Gait continuity ───────────────────────────────────────────────
 print("\n[gait]")
 gp = _gait_params(CFG)
-duty = gp["duty"]
+wp = gp["waypoints"]
+n = len(wp)
 
 def foot(ph, direction=1):
     return foot_offset(ph, gp, direction)
 
 eps = 1e-4
-# stance->swing boundary
-a = foot(duty - eps); b = foot(duty + eps)
-check("continuous at stance->swing",
-      math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05, (a, b))
+# continuous across every interior segment boundary
+worst_jump = 0.0
+for i in range(1, n):
+    a = foot(i / n - eps); b = foot(i / n + eps)
+    worst_jump = max(worst_jump, math.hypot(a[0] - b[0], a[1] - b[1]))
+check(f"continuous at segment boundaries (worst {worst_jump:.4f} mm)", worst_jump < 0.05)
 # swing->stance wrap (phase ~1 -> ~0)
 a = foot(1.0 - eps); b = foot(eps)
 check("continuous across phase wrap",
       math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05, (a, b))
-# lift is zero at both ends of swing, positive in the middle
-check("no lift at swing start", abs(foot(duty + eps)[1] - gp["stance_y_mm"]) < 0.05)
-check("no lift at swing end",   abs(foot(1.0 - eps)[1] - gp["stance_y_mm"]) < 0.05)
-check("lift positive mid-swing", foot((duty + 1.0) / 2)[1] > gp["stance_y_mm"] + 1.0)
-# direction 0 -> parked at mid-stance
-check("direction 0 parks at stance point",
-      foot(0.37, 0) == (gp["stance_x_mm"], gp["stance_y_mm"]))
-# reversing direction mirrors the fore-aft position
-check("backward mirrors forward",
-      abs(foot(0.2, 1)[0] + foot(0.2, -1)[0] - 2 * gp["stance_x_mm"]) < 1e-9)
+# direction 0 -> parked at waypoints[0]
+check("direction 0 parks at waypoints[0]", foot(0.37, 0) == wp[0])
+# reversing direction retraces the same loop in time-reverse
+mismatch = 0.0
+for i in range(1, 8):
+    p = i / 8
+    a = foot(p, -1); b = foot(1.0 - p, 1)
+    mismatch = max(mismatch, math.hypot(a[0] - b[0], a[1] - b[1]))
+check(f"backward retraces forward in reverse (worst {mismatch:.4f} mm)", mismatch < 1e-6)
 
 # trot phase groups: diagonal pairs share phase, adjacent differ by 0.5
 check("trot phasing", _PHASE_OFFSET["FL"] == _PHASE_OFFSET["BR"]

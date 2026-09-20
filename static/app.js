@@ -6,7 +6,11 @@
  *   - Click a quadrant -> POST /leg/ik for that leg, then /leg/fk to redraw,
  *     and /leg/send if serial connected and not walking
  *   - Hold ArrowUp/Down (or W/S), or use the Walk buttons, to trot fwd/back
- *   - Gait sliders live-tune cycle time / step length / step height
+ *   - Gait slider live-tunes cycle time
+ *   - "Record" toggles gait-path mode: clicks append a canonical-frame
+ *     waypoint instead of driving the leg; "Save Path" persists the closed
+ *     loop to the gait block and reloads config. WalkController linearly
+ *     interpolates between waypoints, equal time per segment, looping.
  */
 
 // ── Layout of the 2x2 grid ─────────────────────────────────────────────
@@ -27,6 +31,8 @@ const state = {
   walking:    false,
   walkDir:    0,
   pollTimer:  null,
+  recording:  false,
+  waypoints:  [],     // [{x, y, valid}] canonical-frame gait path, in click order
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────
@@ -46,8 +52,12 @@ const walkFwd    = document.getElementById("walk-fwd");
 const walkStatus = document.getElementById("walk-status");
 
 const gCycle = document.getElementById("g-cycle");
-const gLen   = document.getElementById("g-len");
-const gHt    = document.getElementById("g-ht");
+
+const gpRecord = document.getElementById("gp-record");
+const gpUndo   = document.getElementById("gp-undo");
+const gpClear  = document.getElementById("gp-clear");
+const gpSave   = document.getElementById("gp-save");
+const gpList   = document.getElementById("gait-path-list");
 
 // ── Canvas sizing ──────────────────────────────────────────────────────
 function resizeCanvas() {
@@ -96,9 +106,31 @@ function render() {
       mirror:     side === "right",
       label:      `${cell.leg}  (${side || "?"})`,
       selected:   state.selected === cell.leg,
+      gaitPath:   state.waypoints,
     });
   }
   renderReadout();
+}
+
+function renderWaypointList() {
+  gpList.innerHTML = "";
+  state.waypoints.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "gp-item" + (p.valid === false ? " invalid" : "");
+    const label = document.createElement("span");
+    label.textContent = `${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})${p.valid === false ? " ✗" : ""}`;
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "Remove point";
+    del.addEventListener("click", () => {
+      state.waypoints.splice(i, 1);
+      renderWaypointList();
+      render();
+    });
+    row.appendChild(label);
+    row.appendChild(del);
+    gpList.appendChild(row);
+  });
 }
 
 function renderReadout() {
@@ -156,6 +188,22 @@ canvas.addEventListener("click", async (e) => {
 
   const t = Renderer.makeTransform(Config.viewport(), cellRect(cell), side === "right");
   const [lx, ly] = t.toLinkage(cx, cy);
+
+  if (state.recording) {
+    const wp = { x: lx, y: ly, valid: null };
+    state.waypoints.push(wp);
+    renderWaypointList();
+    render();
+    try {
+      const r = await legIk(leg, lx, ly);
+      wp.valid = r.valid;
+    } catch (err) {
+      wp.valid = false;
+    }
+    renderWaypointList();
+    render();
+    return;
+  }
 
   state.selected = leg;
   state.legView[leg] = { ...(state.legView[leg] || {}), target: { x: lx, y: ly }, ikValid: null };
@@ -328,10 +376,39 @@ function bindGaitSlider(el, valEl, key, fmt) {
 }
 bindGaitSlider(gCycle, document.getElementById("g-cycle-val"), "cycle_time_s",
                v => parseFloat(v).toFixed(2));
-bindGaitSlider(gLen, document.getElementById("g-len-val"), "step_length_mm",
-               v => String(Math.round(v)));
-bindGaitSlider(gHt, document.getElementById("g-ht-val"), "step_height_mm",
-               v => String(Math.round(v)));
+
+// ── Gait path recording ─────────────────────────────────────────────────
+gpRecord.addEventListener("click", () => {
+  state.recording = !state.recording;
+  gpRecord.classList.toggle("active", state.recording);
+  gpRecord.textContent = state.recording ? "● Recording…" : "● Record";
+  setStatus(state.recording ? "Recording: click a quadrant to add a gait point" : "");
+});
+
+gpUndo.addEventListener("click", () => {
+  state.waypoints.pop();
+  renderWaypointList();
+  render();
+});
+
+gpClear.addEventListener("click", () => {
+  state.waypoints = [];
+  renderWaypointList();
+  render();
+});
+
+gpSave.addEventListener("click", async () => {
+  if (state.waypoints.length < 2) { setStatus("Need at least 2 points to save a path", "error"); return; }
+  gpSave.disabled = true;
+  try {
+    await jpost("/gait/waypoints", { waypoints: state.waypoints.map(p => [p.x, p.y]) });
+    setStatus("Gait path saved", "ok");
+  } catch (e) {
+    setStatus("Save failed: " + e.message, "error");
+  } finally {
+    gpSave.disabled = false;
+  }
+});
 
 // ── Boot ──────────────────────────────────────────────────────────────
 async function bootLegs() {
@@ -341,13 +418,15 @@ async function bootLegs() {
 
   const g = Config.gait();
   gCycle.value = g.cycle_time_s; document.getElementById("g-cycle-val").textContent = g.cycle_time_s.toFixed(2);
-  gLen.value = g.step_length_mm; document.getElementById("g-len-val").textContent = Math.round(g.step_length_mm);
-  gHt.value = g.step_height_mm;  document.getElementById("g-ht-val").textContent = Math.round(g.step_height_mm);
 
-  // Seed each leg at the nominal mid-stance pose.
+  state.waypoints = g.waypoints.map(([x, y]) => ({ x, y, valid: null }));
+  renderWaypointList();
+
+  // Seed each leg at the parked pose (first gait waypoint, or a fallback).
+  const [seedX, seedY] = g.waypoints.length ? g.waypoints[0] : [150, -120];
   for (const { name } of legs) {
     try {
-      const r = await legIk(name, g.stance_x_mm, g.stance_y_mm);
+      const r = await legIk(name, seedX, seedY);
       state.legView[name] = { ikValid: r.valid, angles: { theta1: r.theta1, theta_c: r.theta_c } };
       await refreshLeg(name, r.theta1, r.theta_c);
     } catch (e) {

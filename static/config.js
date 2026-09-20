@@ -63,18 +63,14 @@ const Config = (() => {
     }));
   }
 
-  /** Return the gait block with sensible defaults */
+  /** Return the gait block with sensible defaults. waypoints: [[x,y], ...] canonical-frame loop */
   function gait() {
     const g = get().gait || {};
     return {
       cycle_time_s:      g.cycle_time_s      ?? 1.2,
-      duty:              g.duty              ?? 0.5,
-      step_length_mm:    g.step_length_mm    ?? 40,
-      step_height_mm:    g.step_height_mm    ?? 25,
-      stance_x_mm:       g.stance_x_mm       ?? 150,
-      stance_y_mm:       g.stance_y_mm       ?? -120,
       update_rate_hz:    g.update_rate_hz    ?? 30,
       forward_axis_sign: g.forward_axis_sign ?? 1,
+      waypoints:         g.waypoints         ?? [],
     };
   }
 

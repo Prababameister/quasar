@@ -70,18 +70,23 @@ legs:
       theta_c: {deg0: -90.0,  us0: 1960,  deg1: 0.0, us1: 1300}
       hip:     {deg0: 0.0,   us0: 550,  deg1: 90.0, us1: 1166}
 
-# gait: dead-simple diagonal-trot walking. Foot trajectory is expressed in the
-# canonical left-leg frame (D.x forward, D.y up); the same trajectory drives
-# every leg with a half-cycle phase offset between the two diagonal pairs.
+# gait: diagonal-trot walking driven by a hand-placed foot path. `waypoints` is
+# a closed loop of [x, y] points in the canonical left-leg frame (D.x forward,
+# D.y up), recorded via the "Record" button in the IK UI and saved with
+# "Save Path" (which rewrites just this list in-place). One gait cycle walks
+# the loop start -> ... -> last -> back to start, spending an equal fraction
+# of the cycle on each segment, linearly interpolating the foot position
+# within it. The same loop drives every leg with a half-cycle phase offset
+# between the two diagonal pairs. Direction 0 (stopped) parks the foot at
+# waypoints[0].
 gait:
-  cycle_time_s:     1.2     # duration of one full trot cycle
-  duty:             0.5     # fraction of the cycle a foot spends in stance
-  step_length_mm:   40.0    # total fore-aft foot travel
-  step_height_mm:   25.0    # peak swing lift
-  stance_x_mm:      150.0   # mid-stance foot D.x  (must be reachable)
-  stance_y_mm:     -120.0   # foot height D.y      (must be reachable)
+  cycle_time_s:     1.2     # duration of one full loop
   update_rate_hz:   30      # servo command rate while walking
-  forward_axis_sign: 1      # +1 if canonical +x is robot-forward; flip if it walks backward
+  forward_axis_sign: 1      # +1 if the recorded loop order is robot-forward; flip if it walks backward
+  waypoints:                # canonical-frame [x, y] loop, in mm (must be reachable)
+    - [36.101, -145.259]
+    - [-1.486, -87.557]
+    - [-35.315, -144.092]
 
 # viewport: canvas bounds in mm (adjust to fit your mechanism)
 viewport:

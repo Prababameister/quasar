@@ -16,6 +16,10 @@ POST /walk/start        {direction}   (+1 fwd, -1 back, 0 hold)
 POST /walk/direction    {direction}
 POST /walk/stop
 GET  /walk/status
+POST /walk/params       {cycle_time_s}
+
+GET  /gait/waypoints    current foot-path loop (canonical left-leg frame)
+POST /gait/waypoints    {waypoints: [[x, y], ...]} -> replace loop, persist to YAML, reload
 
 GET  /serial/ports | POST /serial/connect | POST /serial/disconnect | GET /serial/status
 
@@ -24,6 +28,7 @@ GET  /                   serves index.html
 
 import logging
 import pathlib
+import re
 
 import yaml
 import uvicorn
@@ -46,6 +51,61 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("server")
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    """
+    This is a local dev tool whose static/*.js and index.html change often
+    across sessions; without an explicit Cache-Control header browsers may
+    heuristically cache them past an ordinary reload, silently running a
+    stale script against a fresh page (mismatched DOM -> broken JS). Force
+    revalidation on every request instead.
+    """
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+_WAYPOINTS_KEY_RE = re.compile(r'^(?P<indent>[ \t]*)waypoints:(?P<comment>.*)$')
+
+
+def _replace_waypoints_in_yaml(text: str, waypoints: list) -> str:
+    """
+    Rewrite just the gait.waypoints block-sequence in-place, leaving every
+    other line (and all comments/formatting) untouched. Raises ValueError if
+    the `waypoints:` key isn't found.
+    """
+    lines = text.splitlines(keepends=True)
+    for i, raw in enumerate(lines):
+        m = _WAYPOINTS_KEY_RE.match(raw.rstrip("\n"))
+        if not m:
+            continue
+        key_indent = m.group("indent")
+        item_indent = key_indent + "  "
+
+        j = i + 1
+        while j < len(lines):
+            stripped = lines[j].rstrip("\n")
+            if stripped.strip() == "":
+                break
+            indent = len(stripped) - len(stripped.lstrip(" "))
+            if indent <= len(key_indent) or not stripped.lstrip().startswith("-"):
+                break
+            j += 1
+
+        key_line = raw if raw.endswith("\n") else raw + "\n"
+        item_lines = [f"{item_indent}- [{x}, {y}]\n" for x, y in waypoints]
+        return "".join(lines[:i] + [key_line] + item_lines + lines[j:])
+
+    raise ValueError("gait.waypoints key not found in linkage_config.yaml")
+
+
+def _save_waypoints(waypoints: list) -> None:
+    text = CONFIG_PATH.read_text()
+    new_text = _replace_waypoints_in_yaml(text, waypoints)
+    yaml.safe_load(new_text)  # validate before committing to disk
+    CONFIG_PATH.write_text(new_text)
 
 # ── State ──────────────────────────────────────────────────────────────
 _cfg       = {}
@@ -89,9 +149,10 @@ class DirectionRequest(BaseModel):
     direction: int
 
 class GaitParamsRequest(BaseModel):
-    cycle_time_s:   float | None = None
-    step_length_mm: float | None = None
-    step_height_mm: float | None = None
+    cycle_time_s: float | None = None
+
+class WaypointsRequest(BaseModel):
+    waypoints: list[tuple[float, float]]
 
 class SerialConnectRequest(BaseModel):
     port: str
@@ -160,13 +221,19 @@ def leg_send(req: LegSendRequest):
 # ── Walking ───────────────────────────────────────────────────────────
 @app.post("/walk/start")
 def walk_start(req: DirectionRequest):
-    _walker.start(req.direction)
+    try:
+        _walker.start(req.direction)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
 
 
 @app.post("/walk/direction")
 def walk_direction(req: DirectionRequest):
-    _walker.set_direction(req.direction)
+    try:
+        _walker.set_direction(req.direction)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
 
 
@@ -184,6 +251,25 @@ def walk_status():
 @app.post("/walk/params")
 def walk_params(req: GaitParamsRequest):
     return _walker.set_params(**req.model_dump())
+
+
+# ── Gait path ─────────────────────────────────────────────────────────
+@app.get("/gait/waypoints")
+def gait_waypoints():
+    return _cfg.get("gait", {}).get("waypoints", [])
+
+
+@app.post("/gait/waypoints")
+def set_gait_waypoints(req: WaypointsRequest):
+    if _walker and _walker.status()["walking"]:
+        raise HTTPException(status_code=409, detail="Walking — stop before editing the gait path")
+    waypoints = [[round(x, 3), round(y, 3)] for x, y in req.waypoints]
+    try:
+        _save_waypoints(waypoints)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save waypoints: {e}")
+    _load_config()
+    return {"status": "saved", "waypoints": waypoints}
 
 
 # ── Serial ────────────────────────────────────────────────────────────
@@ -225,4 +311,4 @@ def index():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8120, reload=False)
+    uvicorn.run("server:app", host="0.0.0.0", port=8121, reload=False)

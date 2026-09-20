@@ -21,6 +21,9 @@ const Renderer = (() => {
     unreachable: "rgba(216,90,48,0.18)",
     cell:   "#e0dfd8",
     label:  "#6b6b66",
+    path:      "#7F77DD",
+    pathPoint: "#7F77DD",
+    pathBad:   "#D85A30",
   };
 
   /**
@@ -82,6 +85,43 @@ const Renderer = (() => {
   }
 
   /**
+   * Draw a closed gait-path loop: dashed polyline through waypoints (in
+   * click order, wrapping last -> first) plus a numbered dot at each one.
+   * pts = [{x, y, valid}] canonical-frame.
+   */
+  function drawPath(ctx, t, pts) {
+    if (!pts || pts.length < 1) return;
+    ctx.save();
+
+    if (pts.length >= 2) {
+      ctx.strokeStyle = COLORS.path;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const [cx, cy] = t.toCanvas(p.x, p.y);
+        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      });
+      const [cx0, cy0] = t.toCanvas(pts[0].x, pts[0].y);
+      ctx.lineTo(cx0, cy0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    pts.forEach((p, i) => {
+      const [cx, cy] = t.toCanvas(p.x, p.y);
+      const bad = p.valid === false;
+      dot(ctx, cx, cy, 5, bad ? COLORS.pathBad : COLORS.pathPoint, "#fff", 1.5);
+      ctx.font = "600 10px system-ui";
+      ctx.fillStyle = bad ? COLORS.pathBad : COLORS.pathPoint;
+      ctx.textAlign = "center";
+      ctx.fillText(String(i + 1), cx, cy - 9);
+    });
+
+    ctx.restore();
+  }
+
+  /**
    * Draw one leg into a cell.
    *
    * opts = {
@@ -94,12 +134,13 @@ const Renderer = (() => {
    *   mirror,              // flip x (right legs)
    *   label,               // leg name text
    *   selected,            // highlight cell border
+   *   gaitPath,            // [{x,y,valid}] canonical-frame waypoint loop | null
    * }
    */
   function drawLeg(canvas, rect, opts) {
     const ctx = canvas.getContext("2d");
     const { cfg, pts, workspace, target, ikValid,
-            endEffector, vp, mirror, label, selected } = opts;
+            endEffector, vp, mirror, label, selected, gaitPath } = opts;
 
     ctx.save();
     ctx.beginPath();
@@ -122,6 +163,7 @@ const Renderer = (() => {
     ctx.beginPath(); ctx.moveTo(xL, oy); ctx.lineTo(xR, oy); ctx.stroke();
 
     drawWorkspace(ctx, t, workspace, target != null && ikValid === false);
+    drawPath(ctx, t, gaitPath);
 
     if (cfg && pts) {
       const edges = cfg.edges || [];
@@ -174,5 +216,5 @@ const Renderer = (() => {
     ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
   }
 
-  return { makeTransform, drawLeg, clear };
+  return { makeTransform, drawLeg, clear, drawPath };
 })();

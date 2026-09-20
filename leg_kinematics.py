@@ -45,9 +45,12 @@ def hip_fixed_deg(cfg: dict) -> float:
 
 
 def nominal_target(cfg: dict) -> tuple[float, float]:
-    """Mid-stance foot position (canonical left-leg frame) from the gait block."""
+    """Parked foot position (canonical left-leg frame): the first gait waypoint."""
     g = cfg.get("gait", {})
-    return float(g.get("stance_x_mm", 150.0)), float(g.get("stance_y_mm", -120.0))
+    wp = g.get("waypoints") or []
+    if wp:
+        return float(wp[0][0]), float(wp[0][1])
+    return 150.0, -120.0
 
 
 def solve_leg(cfg: dict, leg: str, x: float, y: float) -> dict:

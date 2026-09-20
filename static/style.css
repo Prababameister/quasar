@@ -120,6 +120,45 @@ header h1 { font-size: 16px; font-weight: 500; }
 }
 .gait-sliders input[type=range] { width: 120px; accent-color: var(--accent); cursor: pointer; }
 
+.gait-path-group { flex-direction: column; align-items: flex-start; gap: 6px; }
+.gait-path-buttons { display: flex; gap: 6px; }
+#gp-record.active {
+  background: #7F77DD;
+  border-color: #7F77DD;
+  color: #fff;
+}
+
+.gait-path-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.gait-path-list:empty { display: none; }
+.gp-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 4px 2px 8px;
+}
+.gp-item.invalid { color: var(--danger); border-color: var(--danger); }
+.gp-item button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.gp-item button:hover { color: var(--danger); }
+
 /* ── Main ── */
 main {
   flex: 1;
