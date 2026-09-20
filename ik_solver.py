@@ -34,14 +34,27 @@ def _get_ik_cfg(cfg: dict) -> dict:
     return {**_DEFAULTS, **cfg.get("ik_config", {})}
 
 
+_INF = float("inf")
+
+
 def _angle_limits(cfg: dict) -> dict:
-    """Return {input_name: (min_deg, max_deg)} from config."""
-    limits = {}
+    """Return {input_name: (min_deg, max_deg)} hard limits; unbounded if not set."""
+    return {inp["name"]: (inp.get("min_deg", -_INF), inp.get("max_deg", _INF))
+            for inp in cfg.get("inputs", [])}
+
+
+def _seed_ranges(cfg: dict) -> dict:
+    """
+    Return {input_name: (lo, hi)} spanning the multi-start grid. These only pick
+    where the search begins; they never constrain the result. Falls back to the
+    hard limits if set, else to -180..180.
+    """
+    ranges = {}
     for inp in cfg.get("inputs", []):
-        lo = inp.get("min_deg", -180.0)
-        hi = inp.get("max_deg",  180.0)
-        limits[inp["name"]] = (lo, hi)
-    return limits
+        lo = inp.get("seed_min_deg", inp.get("min_deg", -180.0))
+        hi = inp.get("seed_max_deg", inp.get("max_deg",  180.0))
+        ranges[inp["name"]] = (lo, hi)
+    return ranges
 
 
 def _default_angle(cfg: dict, name: str) -> float:
@@ -61,9 +74,9 @@ def _limit_penalty(val, lo, hi, margin, weight):
     before each joint limit. Keeps gradients informative near walls.
     """
     penalty = 0.0
-    if val < lo + margin:
+    if lo != -_INF and val < lo + margin:
         penalty += ((lo + margin - val) / margin) ** 2
-    if val > hi - margin:
+    if hi != _INF and val > hi - margin:
         penalty += ((val - hi + margin) / margin) ** 2
     return penalty * weight
 
@@ -192,8 +205,11 @@ def ik_solve(cfg: dict, target_x: float, target_y: float) -> dict:
     """
     ikcfg   = _get_ik_cfg(cfg)
     limits  = _angle_limits(cfg)
-    t1_lo, t1_hi = limits.get("theta1",  (-180.0, 180.0))
-    tc_lo, tc_hi = limits.get("theta_c", (-180.0, 180.0))
+    t1_lo, t1_hi = limits.get("theta1",  (-_INF, _INF))
+    tc_lo, tc_hi = limits.get("theta_c", (-_INF, _INF))
+    seeds   = _seed_ranges(cfg)
+    s1_lo, s1_hi = seeds.get("theta1",  (-180.0, 180.0))
+    sc_lo, sc_hi = seeds.get("theta_c", (-180.0, 180.0))
 
     # Build grid of starting points
     n_starts = int(ikcfg["multi_start"])
@@ -205,8 +221,8 @@ def ik_solve(cfg: dict, target_x: float, target_y: float) -> dict:
     ]
     for i in range(n):
         for j in range(n):
-            t1 = t1_lo + (t1_hi - t1_lo) * i / max(n - 1, 1)
-            tc = tc_lo + (tc_hi - tc_lo) * j / max(n - 1, 1)
+            t1 = s1_lo + (s1_hi - s1_lo) * i / max(n - 1, 1)
+            tc = sc_lo + (sc_hi - sc_lo) * j / max(n - 1, 1)
             candidate = (t1, tc)
             if candidate not in starts:
                 starts.append(candidate)

@@ -3,34 +3,55 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Linkage Test Utility</title>
+  <title>Quadruped Leg Test Utility</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header>
-    <h1>Linkage Test Utility</h1>
+    <h1>Quadruped Leg Test Utility</h1>
     <div class="header-controls">
       <span id="status-msg" class="status-msg"></span>
       <button id="btn-reload" class="btn">↺ Reload Config</button>
     </div>
   </header>
 
-  <main>
-    <!-- ── Left panel: FK viewer with sliders ── -->
-    <section class="panel" id="panel-fk">
-      <h2>Forward Kinematics</h2>
-      <canvas id="canvas-fk"></canvas>
-      <div id="sliders"></div>
-      <div id="coords-fk" class="coords-box"></div>
-    </section>
+  <div id="control-bar">
+    <!-- Serial -->
+    <div class="ctl-group">
+      <span class="ctl-label">Hardware</span>
+      <div class="hw-port-row">
+        <select id="hw-port-select"><option value="">— select port —</option></select>
+        <button class="btn" id="hw-refresh" title="Refresh port list">↺</button>
+      </div>
+      <button class="btn btn-hw-connect" id="hw-connect">Connect</button>
+      <span id="hw-serial-status" class="hw-status disconnected">⬤ Disconnected</span>
+    </div>
 
-    <!-- ── Right panel: IK click target ── -->
-    <section class="panel" id="panel-ik">
-      <h2>Inverse Kinematics <span class="hint">(click to set target)</span></h2>
-      <canvas id="canvas-ik"></canvas>
-      <div id="ik-status" class="ik-status"></div>
-      <div id="coords-ik" class="coords-box"></div>
-    </section>
+    <!-- Walk -->
+    <div class="ctl-group">
+      <span class="ctl-label">Walk <span class="hint">(hold ↑ / ↓)</span></span>
+      <button class="btn btn-walk" id="walk-back">◀ Back</button>
+      <button class="btn btn-walk" id="walk-stop">■ Stop</button>
+      <button class="btn btn-walk" id="walk-fwd">Fwd ▶</button>
+      <span id="walk-status" class="walk-status">idle</span>
+    </div>
+
+    <!-- Gait tuning -->
+    <div class="ctl-group gait-sliders">
+      <label>cycle <span id="g-cycle-val">1.20</span>s
+        <input type="range" id="g-cycle" min="0.4" max="3.0" step="0.05" value="1.2"></label>
+      <label>step len <span id="g-len-val">40</span>mm
+        <input type="range" id="g-len" min="0" max="90" step="1" value="40"></label>
+      <label>step ht <span id="g-ht-val">25</span>mm
+        <input type="range" id="g-ht" min="0" max="60" step="1" value="25"></label>
+    </div>
+  </div>
+
+  <main>
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div id="readout" class="coords-box"></div>
   </main>
 
   <script src="/static/config.js"></script>

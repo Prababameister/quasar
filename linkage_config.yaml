@@ -3,6 +3,86 @@
 # end_effector: name of the point treated as the IK target (default: D)
 end_effector: D
 
+# hip_fixed_deg: constant hip angle used for every leg until hip IK exists.
+hip_fixed_deg: 90.0
+
+# legs: the quadruped's four legs. The points/edges/inputs block below is the
+# canonical LEFT-leg geometry, used AS-IS for every leg: a given foot target
+# (x, y) solves to the same theta1/theta_c on the left and right. A right leg
+# is physically built and wired as a mirror image, so commanding it the same
+# canonical angle produces the correct mirrored motion; the UI mirrors its
+# drawing for display only. Use `offsets` below to trim each servo's zero and
+# take up any residual left/right rotation-direction difference.
+#
+#   side        : left | right
+#   channels    : PCA9685 channel (0-11) driving each servo of this leg
+#   offsets     : per-servo angle offset in degrees, ADDED to the IK angle
+#                 before conversion to microseconds. Use these to zero each
+#                 servo and to take up the rotation-direction difference on
+#                 right legs.
+#                 Example: physical 0° of the thigh servo = linkage -55° -> -55.0
+#   calibration : per-servo angle -> microsecond mapping, given as two
+#                 reference points (deg0, us0) and (deg1, us1). Each physical
+#                 servo has its own pulse-width response, so this is a
+#                 straight-line fit PER SERVO rather than one shared range.
+#                 deg0/deg1 are two IK-facing joint angles — us0/us1 are
+#                 whatever microsecond pulse actually drives THAT servo to
+#                 those two angles. To calibrate a servo: use /serial/send_raw
+#                 (or the send_raw command) to sweep its pulse width, note the
+#                 microseconds at which it reaches deg0 and deg1, and enter
+#                 those pairs here. Default below (500/2500 at the existing
+#                 joint range) reproduces the old fixed-range behavior until
+#                 you calibrate a given servo.
+#
+# Edit `channels` to match your wiring. Run POST /config/reload (or click
+# Reload Config) to apply changes without restarting.
+legs:
+  FL:
+    side: left
+    channels: {theta1: 0,  theta_c: 1,  hip: 2}
+    offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
+    calibration:
+      theta1:  {deg0: 90,  us0: 500, deg1: 180.0, us1: 1140}
+      theta_c: {deg0: -90, us0: 500, deg1: 0, us1: 1140}
+      hip:     {deg0: 0.0,   us0: 1850, deg1: 90.0, us1: 1200}
+  BL:
+    side: left
+    channels: {theta1: 3,  theta_c: 4,  hip: 5}
+    offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
+    calibration:
+      theta1:  {deg0: 90.0,  us0: 580, deg1: 180.0, us1: 1200}
+      theta_c: {deg0: 0.0, us0: 1230, deg1: -90.0, us1: 575}
+      hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
+  BR:
+    side: right
+    channels: {theta1: 6,  theta_c: 7,  hip: 8}
+    offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
+    calibration:
+      theta1:  {deg0: 90.0,  us0: 2420, deg1: 180.0, us1: 1785}
+      theta_c: {deg0: 0, us0: 1400, deg1: -90, us1: 2020}
+      hip:     {deg0: 0,   us0: 560, deg1: 90, us1: 1180}
+  FR:
+    side: right
+    channels: {theta1: 9,  theta_c: 10, hip: 11}
+    offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
+    calibration:
+      theta1:  {deg0: 90.0,  us0: 2310, deg1: 180.0, us1: 1700}
+      theta_c: {deg0: -90.0,  us0: 1960,  deg1: 0.0, us1: 1300}
+      hip:     {deg0: 0.0,   us0: 550,  deg1: 90.0, us1: 1166}
+
+# gait: dead-simple diagonal-trot walking. Foot trajectory is expressed in the
+# canonical left-leg frame (D.x forward, D.y up); the same trajectory drives
+# every leg with a half-cycle phase offset between the two diagonal pairs.
+gait:
+  cycle_time_s:     1.2     # duration of one full trot cycle
+  duty:             0.5     # fraction of the cycle a foot spends in stance
+  step_length_mm:   40.0    # total fore-aft foot travel
+  step_height_mm:   25.0    # peak swing lift
+  stance_x_mm:      150.0   # mid-stance foot D.x  (must be reachable)
+  stance_y_mm:     -120.0   # foot height D.y      (must be reachable)
+  update_rate_hz:   30      # servo command rate while walking
+  forward_axis_sign: 1      # +1 if canonical +x is robot-forward; flip if it walks backward
+
 # viewport: canvas bounds in mm (adjust to fit your mechanism)
 viewport:
   xmin: -50
@@ -81,13 +161,13 @@ inputs:
     point: A
     angle_deg: 45.0
     min_deg: 90.0
-    max_deg:  270.0
+    max_deg: 360.0
   - name: theta_c
     pivot: Q
     point: P1
     angle_deg: -30.0
     min_deg: -90.0
-    max_deg:  90.0
+    max_deg: 180.0
 
 angle_constraints:
   - edge1: [B, Q]

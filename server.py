@@ -1,19 +1,29 @@
 """
-server.py — FastAPI backend for the linkage test utility.
+server.py — FastAPI backend for the quadruped leg test utility.
 
 Endpoints
 ---------
-GET  /config           returns parsed config as JSON
-POST /config/reload    re-reads YAML from disk, recomputes workspace
-POST /fk               {theta1, theta_c} -> all named points
-POST /ik               {x, y}            -> {theta1, theta_c, valid, d_actual}
-GET  /workspace        precomputed reachable D positions
-GET  /                 serves index.html
+GET  /config            parsed config as JSON
+POST /config/reload     re-read YAML, recompute workspace, refresh gait params
+GET  /workspace         precomputed reachable D positions (canonical left-leg frame)
+GET  /legs              leg names, sides, channels
+
+POST /leg/fk            {leg, theta1, theta_c}     -> points for that leg
+POST /leg/ik            {leg, x, y}                -> IK solution for that leg
+POST /leg/send          {leg, theta1, theta_c}    -> command one leg over serial
+
+POST /walk/start        {direction}   (+1 fwd, -1 back, 0 hold)
+POST /walk/direction    {direction}
+POST /walk/stop
+GET  /walk/status
+
+GET  /serial/ports | POST /serial/connect | POST /serial/disconnect | GET /serial/status
+
+GET  /                   serves index.html
 """
 
-import math
-import pathlib
 import logging
+import pathlib
 
 import yaml
 import uvicorn
@@ -22,9 +32,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from linkage_solver import fk_solve, _find_edge_length
-from ik_solver import ik_solve
 from workspace import compute_workspace
+from serial_manager import get_manager
+from leg_kinematics import solve_leg, fk_leg, leg_names, hip_fixed_deg
+from gait import WalkController
 
 # ── Paths ──────────────────────────────────────────────────────────────
 ROOT        = pathlib.Path(__file__).parent
@@ -38,33 +49,56 @@ app = FastAPI()
 
 # ── State ──────────────────────────────────────────────────────────────
 _cfg       = {}
-_workspace = []   # list of {x, y} dicts
+_workspace = []
+_walker: WalkController | None = None
 
 
 def _load_config():
-    global _cfg, _workspace
+    global _cfg, _workspace, _walker
     with open(CONFIG_PATH) as f:
         _cfg = yaml.safe_load(f)
     log.info("Config loaded — recomputing workspace…")
     _workspace = compute_workspace(_cfg)
     log.info(f"Workspace: {len(_workspace)} points")
+    if _walker is None:
+        _walker = WalkController(_cfg, get_manager())
+    else:
+        _walker.refresh_config(_cfg)
 
 
 _load_config()
 
 
-# ── Request / Response models ──────────────────────────────────────────
-class FKRequest(BaseModel):
+# ── Request models ─────────────────────────────────────────────────────
+class LegFKRequest(BaseModel):
+    leg:     str
     theta1:  float
     theta_c: float
 
-class IKRequest(BaseModel):
-    x: float
-    y: float
+class LegIKRequest(BaseModel):
+    leg: str
+    x:   float
+    y:   float
+
+class LegSendRequest(BaseModel):
+    leg:     str
+    theta1:  float
+    theta_c: float
+
+class DirectionRequest(BaseModel):
+    direction: int
+
+class GaitParamsRequest(BaseModel):
+    cycle_time_s:   float | None = None
+    step_length_mm: float | None = None
+    step_height_mm: float | None = None
+
+class SerialConnectRequest(BaseModel):
+    port: str
+    baud: int = 115200
 
 
-# ── Routes ────────────────────────────────────────────────────────────
-
+# ── Config / workspace ────────────────────────────────────────────────
 @app.get("/config")
 def get_config():
     return JSONResponse(_cfg)
@@ -79,31 +113,110 @@ def reload_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/fk")
-def forward_kinematics(req: FKRequest):
-    try:
-        pts = fk_solve(_cfg, {"theta1": req.theta1, "theta_c": req.theta_c})
-        return {name: {"x": round(xy[0], 4), "y": round(xy[1], 4)}
-                for name, xy in pts.items()}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/ik")
-def inverse_kinematics(req: IKRequest):
-    try:
-        result = ik_solve(_cfg, req.x, req.y)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @app.get("/workspace")
 def get_workspace():
     return _workspace
 
 
-# ── Static files + SPA fallback ───────────────────────────────────────
+@app.get("/legs")
+def get_legs():
+    return [
+        {"name": name, "side": lc["side"], "channels": lc["channels"]}
+        for name, lc in _cfg.get("legs", {}).items()
+    ]
+
+
+# ── Per-leg kinematics ────────────────────────────────────────────────
+@app.post("/leg/fk")
+def leg_forward_kinematics(req: LegFKRequest):
+    try:
+        return fk_leg(_cfg, req.leg, req.theta1, req.theta_c)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/leg/ik")
+def leg_inverse_kinematics(req: LegIKRequest):
+    try:
+        return solve_leg(_cfg, req.leg, req.x, req.y)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/leg/send")
+def leg_send(req: LegSendRequest):
+    if _walker and _walker.status()["walking"]:
+        raise HTTPException(status_code=409, detail="Walking — stop before manual send")
+    mgr = get_manager()
+    try:
+        mgr.send_leg(_cfg, req.leg, req.theta1, req.theta_c, hip_fixed_deg(_cfg))
+        return {"status": "sent", "leg": req.leg}
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Walking ───────────────────────────────────────────────────────────
+@app.post("/walk/start")
+def walk_start(req: DirectionRequest):
+    _walker.start(req.direction)
+    return _walker.status()
+
+
+@app.post("/walk/direction")
+def walk_direction(req: DirectionRequest):
+    _walker.set_direction(req.direction)
+    return _walker.status()
+
+
+@app.post("/walk/stop")
+def walk_stop():
+    _walker.stop()
+    return _walker.status()
+
+
+@app.get("/walk/status")
+def walk_status():
+    return {**_walker.status(), "params": _walker.params()}
+
+
+@app.post("/walk/params")
+def walk_params(req: GaitParamsRequest):
+    return _walker.set_params(**req.model_dump())
+
+
+# ── Serial ────────────────────────────────────────────────────────────
+@app.get("/serial/ports")
+def serial_ports():
+    return get_manager().list_ports()
+
+
+@app.post("/serial/connect")
+def serial_connect(req: SerialConnectRequest):
+    mgr = get_manager()
+    try:
+        mgr.connect(req.port, req.baud)
+        return {"status": "connected", "port": req.port, "baud": req.baud}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/serial/disconnect")
+def serial_disconnect():
+    if _walker:
+        _walker.stop()
+    get_manager().disconnect()
+    return {"status": "disconnected"}
+
+
+@app.get("/serial/status")
+def serial_status():
+    mgr = get_manager()
+    return {"connected": mgr.connected, "port": mgr.port_name}
+
+
+# ── Static files ──────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
@@ -112,4 +225,4 @@ def index():
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("server:app", host="0.0.0.0", port=8120, reload=False)
