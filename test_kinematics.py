@@ -12,7 +12,7 @@ import yaml
 from cobs import cobs
 
 from leg_kinematics import solve_leg, fk_leg, leg_names
-from gait import foot_offset, _gait_params, _PHASE_OFFSET
+from gait import leg_direction, foot_offset, _gait_params, _PHASE_OFFSET
 from serial_manager import SerialManager, _deg_to_us, N_CHANNELS
 
 CFG = yaml.safe_load(open("linkage_config.yaml"))
@@ -76,13 +76,26 @@ check("continuous across phase wrap",
       math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05, (a, b))
 # direction 0 -> parked at waypoints[0]
 check("direction 0 parks at waypoints[0]", foot(0.37, 0) == wp[0])
-# reversing direction retraces the same loop in time-reverse
+# reversing direction retraces the same loop in time-reverse, reflected about
+# the centre of the stance segment so stance stays at the same phase
+sc = gp["stance_center"]
 mismatch = 0.0
 for i in range(1, 8):
     p = i / 8
-    a = foot(p, -1); b = foot(1.0 - p, 1)
+    a = foot(p, -1); b = foot((2 * sc - p) % 1.0, 1)
     mismatch = max(mismatch, math.hypot(a[0] - b[0], a[1] - b[1]))
 check(f"backward retraces forward in reverse (worst {mismatch:.4f} mm)", mismatch < 1e-6)
+
+# stance timing is preserved under reversal (needed for opposite-side turning)
+ground = min(wp[i][1] + wp[(i + 1) % n][1] for i in range(n))
+def on_ground(f): return f[1] < (ground / 2) + 1.0
+same = all(on_ground(foot(i / 60, 1)) == on_ground(foot(i / 60, -1)) for i in range(60))
+check("forward and reversed legs share the same stance window", same)
+
+# turning: sides run opposite directions, straight walking is uniform
+check("turn directions", leg_direction("left", 0, 1) == 1 and leg_direction("right", 0, 1) == -1
+      and leg_direction("left", 0, -1) == -1 and leg_direction("right", 0, -1) == 1
+      and leg_direction("right", 1, 0) == 1)
 
 # trot phase groups: diagonal pairs share phase, adjacent differ by 0.5
 check("trot phasing", _PHASE_OFFSET["FL"] == _PHASE_OFFSET["BR"]

@@ -30,6 +30,7 @@ const state = {
   serialConn: false,
   walking:    false,
   walkDir:    0,
+  walkTurn:   0,      // +1 rotating right, -1 rotating left
   pollTimer:  null,
   recording:  false,
   waypoints:  [],     // [{x, y, valid}] canonical-frame gait path, in click order
@@ -49,6 +50,8 @@ const hwStatus     = document.getElementById("hw-serial-status");
 const walkBack   = document.getElementById("walk-back");
 const walkStopEl = document.getElementById("walk-stop");
 const walkFwd    = document.getElementById("walk-fwd");
+const walkLeft   = document.getElementById("walk-left");
+const walkRight  = document.getElementById("walk-right");
 const walkStatus = document.getElementById("walk-status");
 
 const gCycle = document.getElementById("g-cycle");
@@ -304,12 +307,13 @@ hwConnect.addEventListener("click", async () => {
 });
 
 // ── Walking ───────────────────────────────────────────────────────────
-async function walkStart(dir) {
-  if (state.walkDir === dir) return;
+async function walkStart(dir, turn = 0) {
+  if (state.walkDir === dir && state.walkTurn === turn) return;
   try {
-    await jpost("/walk/start", { direction: dir });
-    state.walking = dir !== 0;
+    await jpost("/walk/start", { direction: dir, turn });
+    state.walking = dir !== 0 || turn !== 0;
     state.walkDir = dir;
+    state.walkTurn = turn;
     updateWalkUI();
     startPoll();
   } catch (e) {
@@ -323,6 +327,7 @@ async function walkStop() {
   } catch (e) { /* ignore */ }
   state.walking = false;
   state.walkDir = 0;
+  state.walkTurn = 0;
   updateWalkUI();
   stopPoll();
 }
@@ -330,9 +335,11 @@ async function walkStop() {
 function updateWalkUI() {
   walkFwd.classList.toggle("active", state.walkDir === 1);
   walkBack.classList.toggle("active", state.walkDir === -1);
-  walkStatus.textContent = state.walking
-    ? (state.walkDir === 1 ? "walking ▶" : "◀ walking")
-    : "idle";
+  walkLeft.classList.toggle("active", state.walkTurn === -1);
+  walkRight.classList.toggle("active", state.walkTurn === 1);
+  walkStatus.textContent = !state.walking ? "idle"
+    : state.walkTurn ? (state.walkTurn === 1 ? "turning ⟳" : "⟲ turning")
+    : (state.walkDir === 1 ? "walking ▶" : "◀ walking");
 }
 
 function startPoll() {
@@ -341,9 +348,9 @@ function startPoll() {
     try {
       const s = await fetch("/walk/status").then(r => r.json());
       walkStatus.textContent = s.walking
-        ? `${s.direction === 1 ? "▶" : "◀"} phase ${s.phase.toFixed(2)}`
+        ? `${s.turn ? (s.turn === 1 ? "⟳" : "⟲") : (s.direction === 1 ? "▶" : "◀")} phase ${s.phase.toFixed(2)}`
         : "idle";
-      if (!s.walking) { state.walking = false; state.walkDir = 0; updateWalkUI(); stopPoll(); }
+      if (!s.walking) { state.walking = false; state.walkDir = 0; state.walkTurn = 0; updateWalkUI(); stopPoll(); }
     } catch (e) { /* ignore */ }
   }, 200);
 }
@@ -353,6 +360,8 @@ function stopPoll() {
 
 walkFwd.addEventListener("click", () => walkStart(1));
 walkBack.addEventListener("click", () => walkStart(-1));
+walkLeft.addEventListener("click", () => walkStart(0, -1));
+walkRight.addEventListener("click", () => walkStart(0, 1));
 walkStopEl.addEventListener("click", () => walkStop());
 
 // Hold-to-walk keyboard
@@ -360,9 +369,11 @@ window.addEventListener("keydown", (e) => {
   if (e.repeat) return;
   if (e.key === "ArrowUp" || e.key === "w") { e.preventDefault(); walkStart(1); }
   else if (e.key === "ArrowDown" || e.key === "s") { e.preventDefault(); walkStart(-1); }
+  else if (e.key === "ArrowLeft" || e.key === "a") { e.preventDefault(); walkStart(0, -1); }
+  else if (e.key === "ArrowRight" || e.key === "d") { e.preventDefault(); walkStart(0, 1); }
 });
 window.addEventListener("keyup", (e) => {
-  if (["ArrowUp", "ArrowDown", "w", "s"].includes(e.key)) walkStop();
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "s", "a", "d"].includes(e.key)) walkStop();
 });
 window.addEventListener("blur", () => { if (state.walking) walkStop(); });
 

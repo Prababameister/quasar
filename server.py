@@ -12,8 +12,9 @@ POST /leg/fk            {leg, theta1, theta_c}     -> points for that leg
 POST /leg/ik            {leg, x, y}                -> IK solution for that leg
 POST /leg/send          {leg, theta1, theta_c}    -> command one leg over serial
 
-POST /walk/start        {direction}   (+1 fwd, -1 back, 0 hold)
-POST /walk/direction    {direction}
+POST /walk/start        {direction, turn}   (direction +1 fwd, -1 back, 0 hold;
+                                       turn +1 right, -1 left, overrides direction)
+POST /walk/direction    {direction, turn}
 POST /walk/stop
 GET  /walk/status
 POST /walk/params       {cycle_time_s}
@@ -146,7 +147,8 @@ class LegSendRequest(BaseModel):
     theta_c: float
 
 class DirectionRequest(BaseModel):
-    direction: int
+    direction: int = 0
+    turn: int = 0
 
 class GaitParamsRequest(BaseModel):
     cycle_time_s: float | None = None
@@ -222,7 +224,7 @@ def leg_send(req: LegSendRequest):
 @app.post("/walk/start")
 def walk_start(req: DirectionRequest):
     try:
-        _walker.start(req.direction)
+        _walker.start(req.direction, req.turn)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
@@ -231,7 +233,7 @@ def walk_start(req: DirectionRequest):
 @app.post("/walk/direction")
 def walk_direction(req: DirectionRequest):
     try:
-        _walker.set_direction(req.direction)
+        _walker.set_direction(req.direction, req.turn)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
