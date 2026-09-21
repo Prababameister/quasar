@@ -16,6 +16,9 @@ POST /walk/start        {direction, turn}   (direction +1 fwd, -1 back, 0 hold;
                                        turn +1 right, -1 left, overrides direction)
 POST /walk/direction    {direction, turn}
 POST /walk/stop
+POST /jump            run the straight-up jump (needs serial connected)
+GET  /jump/points     neutral / crouch / extend foot targets
+POST /jump/points     {neutral, crouch, extend} -> persist to YAML, reload
 GET  /walk/status
 POST /walk/params       {cycle_time_s}
 
@@ -102,6 +105,44 @@ def _replace_waypoints_in_yaml(text: str, waypoints: list) -> str:
     raise ValueError("gait.waypoints key not found in linkage_config.yaml")
 
 
+_JUMP_POINT_RE = re.compile(r'^(?P<head>[ \t]+(?P<key>neutral|crouch|extend):\s*)\[[^\]]*\](?P<tail>.*)$')
+
+
+def _replace_jump_points_in_yaml(text: str, points: dict) -> str:
+    """
+    Rewrite just the neutral/crouch/extend `[x, y]` values inside the top-level
+    `jump:` block in-place, leaving comments and formatting untouched. Raises
+    ValueError if the block or any of the three keys is missing.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, l in enumerate(lines) if l.startswith("jump:")), None)
+    if start is None:
+        raise ValueError("jump key not found in linkage_config.yaml")
+
+    seen = set()
+    for j in range(start + 1, len(lines)):
+        raw = lines[j].rstrip("\n")
+        if raw.strip() and not raw.startswith((" ", "\t", "#")):
+            break  # next top-level key
+        m = _JUMP_POINT_RE.match(raw)
+        if m and m.group("key") in points:
+            x, y = points[m.group("key")]
+            lines[j] = f"{m.group('head')}[{x}, {y}]{m.group('tail')}\n"
+            seen.add(m.group("key"))
+
+    missing = set(points) - seen
+    if missing:
+        raise ValueError(f"jump.{', jump.'.join(sorted(missing))} not found in linkage_config.yaml")
+    return "".join(lines)
+
+
+def _save_jump_points(points: dict) -> None:
+    text = CONFIG_PATH.read_text()
+    new_text = _replace_jump_points_in_yaml(text, points)
+    yaml.safe_load(new_text)  # validate before committing to disk
+    CONFIG_PATH.write_text(new_text)
+
+
 def _save_waypoints(waypoints: list) -> None:
     text = CONFIG_PATH.read_text()
     new_text = _replace_waypoints_in_yaml(text, waypoints)
@@ -156,6 +197,11 @@ class GaitParamsRequest(BaseModel):
 class WaypointsRequest(BaseModel):
     waypoints: list[tuple[float, float]]
 
+class JumpPointsRequest(BaseModel):
+    neutral: tuple[float, float]
+    crouch:  tuple[float, float]
+    extend:  tuple[float, float]
+
 class SerialConnectRequest(BaseModel):
     port: str
     baud: int = 115200
@@ -208,8 +254,9 @@ def leg_inverse_kinematics(req: LegIKRequest):
 
 @app.post("/leg/send")
 def leg_send(req: LegSendRequest):
-    if _walker and _walker.status()["walking"]:
-        raise HTTPException(status_code=409, detail="Walking — stop before manual send")
+    st = _walker.status() if _walker else {}
+    if st.get("walking") or st.get("jumping"):
+        raise HTTPException(status_code=409, detail="Walking/jumping — stop before manual send")
     mgr = get_manager()
     try:
         mgr.send_leg(_cfg, req.leg, req.theta1, req.theta_c, hip_fixed_deg(_cfg))
@@ -253,6 +300,36 @@ def walk_status():
 @app.post("/walk/params")
 def walk_params(req: GaitParamsRequest):
     return _walker.set_params(**req.model_dump())
+
+
+# ── Jump ──────────────────────────────────────────────────────────────
+@app.post("/jump")
+def jump():
+    try:
+        _walker.jump()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _walker.status()
+
+
+@app.get("/jump/points")
+def jump_points():
+    return _cfg.get("jump", {})
+
+
+@app.post("/jump/points")
+def set_jump_points(req: JumpPointsRequest):
+    if _walker and _walker.status()["jumping"]:
+        raise HTTPException(status_code=409, detail="Jumping — wait before editing the jump points")
+    points = {k: [round(x, 3), round(y, 3)] for k, (x, y) in req.model_dump().items()}
+    try:
+        _save_jump_points(points)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save jump points: {e}")
+    _load_config()
+    return {"status": "saved", **points}
 
 
 # ── Gait path ─────────────────────────────────────────────────────────

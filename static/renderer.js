@@ -23,6 +23,7 @@ const Renderer = (() => {
     label:  "#6b6b66",
     path:      "#7F77DD",
     pathPoint: "#7F77DD",
+    jumpPoint: "#BA7517",
     pathBad:   "#D85A30",
   };
 
@@ -121,6 +122,30 @@ const Renderer = (() => {
     ctx.restore();
   }
 
+  const JUMP_LABELS = { neutral: "N", crouch: "C", extend: "E" };
+
+  /** Draw the jump neutral/crouch/extend points: {key: {x,y,valid}} */
+  function drawJumpPoints(ctx, t, jp) {
+    if (!jp) return;
+    ctx.save();
+    for (const [key, p] of Object.entries(jp)) {
+      if (!p) continue;
+      const [cx, cy] = t.toCanvas(p.x, p.y);
+      const bad = p.valid === false;
+      const col = bad ? COLORS.pathBad : COLORS.jumpPoint;
+      ctx.fillStyle = col;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+      ctx.beginPath();  // diamond, to tell it apart from gait-path dots
+      ctx.moveTo(cx, cy - 7); ctx.lineTo(cx + 7, cy);
+      ctx.lineTo(cx, cy + 7); ctx.lineTo(cx - 7, cy); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.font = "600 10px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(JUMP_LABELS[key] || key, cx, cy - 11);
+    }
+    ctx.restore();
+  }
+
   /**
    * Draw one leg into a cell.
    *
@@ -135,12 +160,13 @@ const Renderer = (() => {
    *   label,               // leg name text
    *   selected,            // highlight cell border
    *   gaitPath,            // [{x,y,valid}] canonical-frame waypoint loop | null
+   *   jumpPoints,          // {neutral,crouch,extend: {x,y,valid}|null} | null
    * }
    */
   function drawLeg(canvas, rect, opts) {
     const ctx = canvas.getContext("2d");
     const { cfg, pts, workspace, target, ikValid,
-            endEffector, vp, mirror, label, selected, gaitPath } = opts;
+            endEffector, vp, mirror, label, selected, gaitPath, jumpPoints } = opts;
 
     ctx.save();
     ctx.beginPath();
@@ -164,6 +190,7 @@ const Renderer = (() => {
 
     drawWorkspace(ctx, t, workspace, target != null && ikValid === false);
     drawPath(ctx, t, gaitPath);
+    drawJumpPoints(ctx, t, jumpPoints);
 
     if (cfg && pts) {
       const edges = cfg.edges || [];

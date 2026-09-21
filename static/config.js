@@ -74,5 +74,15 @@ const Config = (() => {
     };
   }
 
-  return { load, reload, get, inputs, viewport, endEffector, legs, gait };
+  /** Return the jump block: neutral/crouch/extend are [x,y] or null */
+  function jump() {
+    const j = get().jump || {};
+    return {
+      neutral: j.neutral ?? null,
+      crouch:  j.crouch  ?? null,
+      extend:  j.extend  ?? null,
+    };
+  }
+
+  return { load, reload, get, inputs, viewport, endEffector, legs, gait, jump };
 })();

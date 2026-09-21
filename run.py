@@ -3,6 +3,7 @@ run.py — drive the quadruped from the keyboard, no web server needed.
 
     w : walk forward         a : rotate left (counter-clockwise)
     s : walk backward        d : rotate right (clockwise)
+    j : jump straight up (only while stopped)
     space / x : stop (feet parked at the start of the gait path)
     q / Ctrl-C : stop and quit
 
@@ -95,6 +96,16 @@ def main() -> None:
             ch = sys.stdin.read(1).lower()
             if ch in ("q", "\x03"):
                 break
+            if ch == "j":
+                if current != (0, 0):
+                    continue  # stop before jumping
+                try:
+                    walker.jump()
+                except (ValueError, RuntimeError) as e:
+                    status_line(f"jump: {e}")
+                else:
+                    status_line("jumping")
+                continue
             if ch in (" ", "x"):
                 cmd = (0, 0)
             elif ch in KEYS:

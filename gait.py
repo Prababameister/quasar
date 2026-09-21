@@ -22,6 +22,10 @@ segment, so a reversed leg spends exactly the same part of the cycle on the
 ground as a forward one. That keeps diagonal pairs landing together and the
 two sides' stance/swing timing aligned when they run in opposite directions.
 
+WalkController also runs a one-shot straight-up jump (see jump()): all four legs
+in phase, neutral -> crouch (eased) -> extend (a single step, so the servos run
+at full speed) -> hold -> neutral.
+
 WalkController runs a background thread that, while walking, advances the
 phase at `update_rate_hz`, solves IK for all four legs, and streams one
 12-channel frame per tick through the serial manager.
@@ -61,6 +65,22 @@ def _gait_params(cfg: dict) -> dict:
         "update_rate_hz":    float(g.get("update_rate_hz", 30.0)),
         "forward_axis_sign": float(g.get("forward_axis_sign", 1.0)),
         "waypoints":         waypoints,
+    }
+
+
+def _jump_params(cfg: dict) -> dict:
+    j = cfg.get("jump") or {}
+
+    def pt(key):
+        v = j.get(key)
+        return (float(v[0]), float(v[1])) if v and len(v) == 2 else None
+
+    return {
+        "neutral":       pt("neutral"),
+        "crouch":        pt("crouch"),
+        "extend":        pt("extend"),
+        "crouch_time_s": float(j.get("crouch_time_s", 0.5)),
+        "extend_hold_s": float(j.get("extend_hold_s", 0.15)),
     }
 
 
@@ -117,6 +137,8 @@ class WalkController:
         self._direction = 0
         self._turn = 0
         self._phase = 0.0
+        self._jumping = False
+        self._jump_abort = threading.Event()
 
         self._thread: threading.Thread | None = None
         self._stop_evt = threading.Event()
@@ -151,6 +173,10 @@ class WalkController:
         with self._lock:
             n_waypoints = len(self._gp["waypoints"])
         moving = direction != 0 or turn != 0
+        with self._lock:
+            jumping = self._jumping
+        if moving and jumping:
+            raise ValueError("Jumping — wait for the jump to finish")
         if moving and n_waypoints < 2:
             raise ValueError("Need at least 2 gait waypoints — record and save a path first")
         with self._lock:
@@ -167,6 +193,11 @@ class WalkController:
             self._walking = False
             self._direction = 0
             self._turn = 0
+            jumping = self._jumping
+        if jumping:
+            # The jump thread lands the legs at neutral itself; don't fight it.
+            self._jump_abort.set()
+            return
         # Park the feet at waypoints[0] once, if we can.
         self._send_once(direction=0, turn=0)
 
@@ -182,8 +213,78 @@ class WalkController:
                 "walking": self._walking,
                 "direction": self._direction,
                 "turn": self._turn,
+                "jumping": self._jumping,
                 "phase": round(self._phase, 4),
             }
+
+    # ── jump ──────────────────────────────────────────────────────────
+    def jump(self) -> None:
+        """
+        Start a straight-up jump on a background thread and return immediately.
+
+        Raises ValueError if the jump block is missing/unreachable, or if a
+        walk or another jump is already in progress, and RuntimeError if the
+        serial port is not connected.
+        """
+        with self._lock:
+            cfg = self._cfg
+            if self._walking:
+                raise ValueError("Walking — stop before jumping")
+            if self._jumping:
+                raise ValueError("Already jumping")
+        if not self._mgr.connected:
+            raise RuntimeError("Not connected to a serial port")
+
+        jp = _jump_params(cfg)
+        for name in ("neutral", "crouch", "extend"):
+            if jp[name] is None:
+                raise ValueError(f"jump.{name} is not set")
+            x, y = jp[name]
+            res = solve_leg(cfg, next(iter(cfg["legs"])), x, y)
+            if not res.get("valid", False):
+                raise ValueError(f"jump.{name} ({x:.1f}, {y:.1f}) is unreachable "
+                                 f"(err {res.get('error_mm', -1):.1f} mm)")
+
+        with self._lock:
+            self._jumping = True
+        self._jump_abort.clear()
+        threading.Thread(target=self._run_jump, args=(cfg, jp),
+                         name="jump", daemon=True).start()
+
+    def _send_foot(self, cfg: dict, x: float, y: float) -> None:
+        """Command every leg to the same canonical foot target."""
+        res = solve_leg(cfg, next(iter(cfg["legs"])), x, y)
+        hip = hip_fixed_deg(cfg)
+        angles = {leg: (res["theta1"], res["theta_c"], hip) for leg in cfg["legs"]}
+        self._mgr.send_legs(cfg, angles)
+
+    def _run_jump(self, cfg: dict, jp: dict) -> None:
+        try:
+            nx, ny = jp["neutral"]
+            cx, cy = jp["crouch"]
+            self._send_foot(cfg, nx, ny)
+
+            dt = 1.0 / max(1.0, self._gp["update_rate_hz"])
+            t0 = time.monotonic()
+            while not self._jump_abort.is_set():
+                u = min(1.0, (time.monotonic() - t0) / max(jp["crouch_time_s"], 1e-3))
+                self._send_foot(cfg, nx + (cx - nx) * u, ny + (cy - ny) * u)
+                if u >= 1.0:
+                    break
+                time.sleep(dt)
+
+            if not self._jump_abort.is_set():
+                self._send_foot(cfg, *jp["extend"])
+                self._jump_abort.wait(jp["extend_hold_s"])
+        except Exception as e:  # pragma: no cover - hardware faults
+            log.error("jump: failed: %s", e)
+        finally:
+            try:
+                self._send_foot(cfg, nx, ny)
+            except Exception as e:  # pragma: no cover - hardware faults
+                log.error("jump: landing send failed: %s", e)
+            with self._lock:
+                self._jumping = False
 
     # ── worker ────────────────────────────────────────────────────────
     def _ensure_thread(self) -> None:

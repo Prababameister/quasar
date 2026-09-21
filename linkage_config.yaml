@@ -84,9 +84,28 @@ gait:
   update_rate_hz:   30      # servo command rate while walking
   forward_axis_sign: 1      # +1 if the recorded loop order is robot-forward; flip if it walks backward
   waypoints:                # canonical-frame [x, y] loop, in mm (must be reachable)
-    - [36.101, -145.259]
-    - [-1.486, -87.557]
-    - [-35.315, -144.092]
+    - [14.818, -170.029]
+    - [10.629, -150.203]
+    - [-1.939, -138.105]
+    - [-21.489, -150.203]
+    - [-25.678, -167.486]
+
+# jump: a straight-up jump, all four legs in phase. Points are canonical-frame
+# [x, y] foot targets in mm (must be reachable), set via the Jump controls in
+# the UI. Keep x the same for all three so the push is vertical.
+#   neutral : pose the jump starts from and lands in
+#   crouch  : loaded pose; the foot is eased neutral -> crouch over crouch_time_s
+#   extend  : launch pose; commanded as a single step so the servos run at full
+#             speed rather than at the interpolation rate
+# After the extend command the legs hold for extend_hold_s (roughly the time
+# to leave the ground), then are commanded straight back to neutral so they are
+# in position before touchdown. Timing is open-loop: tune these on the robot.
+jump:
+  neutral: [-5.0, -150.0]
+  crouch:  [-5.0, -110.0]
+  extend:  [-5.0, -170.0]
+  crouch_time_s: 0.5
+  extend_hold_s: 0.15
 
 # viewport: canvas bounds in mm (adjust to fit your mechanism)
 viewport:

@@ -7,6 +7,8 @@
  *     and /leg/send if serial connected and not walking
  *   - Hold ArrowUp/Down (or W/S), or use the Walk buttons, to trot fwd/back
  *   - Gait slider live-tunes cycle time
+ *   - Jump controls: pick Neutral / Crouch / Extend, click a quadrant to place
+ *     it, "Save Points" persists them; "Jump" (or J) runs the jump
  *   - "Record" toggles gait-path mode: clicks append a canonical-frame
  *     waypoint instead of driving the leg; "Save Path" persists the closed
  *     loop to the gait block and reloads config. WalkController linearly
@@ -34,6 +36,9 @@ const state = {
   pollTimer:  null,
   recording:  false,
   waypoints:  [],     // [{x, y, valid}] canonical-frame gait path, in click order
+  jump:       { neutral: null, crouch: null, extend: null },  // {x, y, valid} each
+  jumpEdit:   null,   // "neutral" | "crouch" | "extend" while placing a jump point
+  jumping:    false,
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────
@@ -61,6 +66,11 @@ const gpUndo   = document.getElementById("gp-undo");
 const gpClear  = document.getElementById("gp-clear");
 const gpSave   = document.getElementById("gp-save");
 const gpList   = document.getElementById("gait-path-list");
+
+const jpButtons = [...document.querySelectorAll(".btn-jp")];
+const jpSave    = document.getElementById("jp-save");
+const jpGo      = document.getElementById("jp-go");
+const jpReadout = document.getElementById("jp-readout");
 
 // ── Canvas sizing ──────────────────────────────────────────────────────
 function resizeCanvas() {
@@ -110,6 +120,7 @@ function render() {
       label:      `${cell.leg}  (${side || "?"})`,
       selected:   state.selected === cell.leg,
       gaitPath:   state.waypoints,
+      jumpPoints: state.jump,
     });
   }
   renderReadout();
@@ -179,7 +190,7 @@ async function refreshLeg(leg, theta1, theta_c) {
 
 // ── Quadrant click -> IK ──────────────────────────────────────────────
 canvas.addEventListener("click", async (e) => {
-  if (state.walking) { setStatus("Stop walking to set a target", "error"); return; }
+  if (state.walking || state.jumping) { setStatus("Stop walking/jumping to set a target", "error"); return; }
   const rect = canvas.getBoundingClientRect();
   const cx = (e.clientX - rect.left) * (canvas.width  / rect.width);
   const cy = (e.clientY - rect.top)  * (canvas.height / rect.height);
@@ -191,6 +202,22 @@ canvas.addEventListener("click", async (e) => {
 
   const t = Renderer.makeTransform(Config.viewport(), cellRect(cell), side === "right");
   const [lx, ly] = t.toLinkage(cx, cy);
+
+  if (state.jumpEdit) {
+    const key = state.jumpEdit;
+    const jp = { x: lx, y: ly, valid: null };
+    state.jump[key] = jp;
+    updateJumpUI();
+    render();
+    try {
+      jp.valid = (await legIk(leg, lx, ly)).valid;
+    } catch (err) {
+      jp.valid = false;
+    }
+    updateJumpUI();
+    render();
+    return;
+  }
 
   if (state.recording) {
     const wp = { x: lx, y: ly, valid: null };
@@ -391,6 +418,7 @@ bindGaitSlider(gCycle, document.getElementById("g-cycle-val"), "cycle_time_s",
 // ── Gait path recording ─────────────────────────────────────────────────
 gpRecord.addEventListener("click", () => {
   state.recording = !state.recording;
+  if (state.recording) { state.jumpEdit = null; updateJumpUI(); }
   gpRecord.classList.toggle("active", state.recording);
   gpRecord.textContent = state.recording ? "● Recording…" : "● Record";
   setStatus(state.recording ? "Recording: click a quadrant to add a gait point" : "");
@@ -421,6 +449,68 @@ gpSave.addEventListener("click", async () => {
   }
 });
 
+// ── Jump ──────────────────────────────────────────────────────────────
+function updateJumpUI() {
+  for (const b of jpButtons) b.classList.toggle("active", state.jumpEdit === b.dataset.key);
+  jpReadout.textContent = ["neutral", "crouch", "extend"].map(k => {
+    const p = state.jump[k];
+    return `${k[0].toUpperCase()}: ` +
+           (p ? `(${p.x.toFixed(0)}, ${p.y.toFixed(0)})${p.valid === false ? " ✗" : ""}` : "—");
+  }).join("  ");
+  jpGo.disabled = state.jumping;
+}
+
+for (const b of jpButtons) {
+  b.addEventListener("click", () => {
+    const key = b.dataset.key;
+    state.jumpEdit = state.jumpEdit === key ? null : key;
+    if (state.jumpEdit) {
+      state.recording = false;
+      gpRecord.classList.remove("active");
+      gpRecord.textContent = "● Record";
+      setStatus(`Click a quadrant to place the ${key} point`);
+    }
+    updateJumpUI();
+  });
+}
+
+jpSave.addEventListener("click", async () => {
+  const { neutral, crouch, extend } = state.jump;
+  if (!neutral || !crouch || !extend) { setStatus("Set neutral, crouch and extend first", "error"); return; }
+  if ([neutral, crouch, extend].some(p => p.valid === false)) { setStatus("A jump point is unreachable", "error"); return; }
+  jpSave.disabled = true;
+  try {
+    const pt = p => [p.x, p.y];
+    await jpost("/jump/points", { neutral: pt(neutral), crouch: pt(crouch), extend: pt(extend) });
+    setStatus("Jump points saved", "ok");
+  } catch (e) {
+    setStatus("Save failed: " + e.message, "error");
+  } finally {
+    jpSave.disabled = false;
+  }
+});
+
+async function doJump() {
+  if (state.jumping) return;
+  try {
+    await jpost("/jump", {});
+    state.jumping = true;
+    updateJumpUI();
+    const poll = setInterval(async () => {
+      try {
+        const s = await fetch("/walk/status").then(r => r.json());
+        if (!s.jumping) { clearInterval(poll); state.jumping = false; updateJumpUI(); }
+      } catch (e) { /* ignore */ }
+    }, 100);
+  } catch (e) {
+    setStatus("Jump error: " + e.message, "error");
+  }
+}
+jpGo.addEventListener("click", doJump);
+window.addEventListener("keydown", (e) => {
+  if (!e.repeat && e.key === "j") doJump();
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────
 async function bootLegs() {
   const legs = Config.legs();
@@ -432,6 +522,12 @@ async function bootLegs() {
 
   state.waypoints = g.waypoints.map(([x, y]) => ({ x, y, valid: null }));
   renderWaypointList();
+
+  const j = Config.jump();
+  for (const k of ["neutral", "crouch", "extend"]) {
+    state.jump[k] = j[k] ? { x: j[k][0], y: j[k][1], valid: null } : null;
+  }
+  updateJumpUI();
 
   // Seed each leg at the parked pose (first gait waypoint, or a fallback).
   const [seedX, seedY] = g.waypoints.length ? g.waypoints[0] : [150, -120];
