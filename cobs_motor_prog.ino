@@ -13,8 +13,7 @@ static unsigned long ledOffAt = 0;
 
 // Last commanded pulse width per PCA9685 channel (0..11). Neutral on boot.
 static uint16_t chan[NUM_CHANNELS] = {
-  1500, 1500, 1500, 1500, 1500, 1500,
-  1500, 1500, 1500, 1500, 1500, 1500
+  2040, 1670, 1300, 580, 575, 1166, 2040, 1670, 1300, 2310, 1960, 1166
 };
 
 // ---------------------------------------------------------------------------
@@ -52,7 +51,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 static void writeAllChannels() {
   for (uint8_t i = 0; i < NUM_CHANNELS; i++) {
-    pwm.writeMicroseconds(i, chan[i]);
+      pwm.writeMicroseconds(i, chan[i]);
   }
 }
 

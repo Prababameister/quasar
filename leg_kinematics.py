@@ -25,6 +25,8 @@ The mirror is handled in exactly two places, neither of which is the solver:
     in a right quadrant is un-flipped back to a canonical target.
 """
 
+import math
+
 from linkage_solver import fk_solve
 from ik_solver import ik_solve
 
@@ -89,3 +91,28 @@ def fk_leg(cfg: dict, leg: str, theta1: float, theta_c: float) -> dict:
         "points": {name: {"x": round(px, 4), "y": round(py, 4)}
                    for name, (px, py) in pts.items()},
     }
+
+def hip_dir(cfg: dict, leg: str) -> float:
+    """+1/-1: which way the hip servo angle moves for an OUTWARD foot shift."""
+    return float(cfg["legs"][leg].get("hip_dir", 1.0))
+
+
+def solve_leg_3d(cfg: dict, leg: str, x: float, y: float, lateral: float = 0.0) -> dict:
+    """
+    x, y    : canonical sagittal target (same as solve_leg; y negative = below hip)
+    lateral : mm the foot sits OUTWARD of the leg's vertical plane (>0 = away from body)
+    Returns the solve_leg dict, but with "hip" computed instead of fixed.
+    """
+    if lateral == 0.0:
+        return solve_leg(cfg, leg, x, y)  # identical to current behaviour
+
+    depth = -y
+    phi = math.atan2(lateral, depth)      # tilt of leg plane from vertical
+    reach = math.hypot(lateral, depth)    # leg length needed in the tilted plane
+
+    res = solve_leg(cfg, leg, x, -reach)  # planar IK, unchanged
+    limit = float(cfg.get("hip_swing_max_deg", 30.0))
+    swing = max(-limit, min(limit, math.degrees(phi)))
+    res["hip"] = hip_fixed_deg(cfg) + hip_dir(cfg, leg) * swing
+    res["lateral"] = lateral
+    return res

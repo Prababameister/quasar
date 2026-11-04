@@ -40,7 +40,7 @@ def _get_line(sys_, wp, line_handles, handles, a, b):
 
 # ── Analytical FK ─────────────────────────────────────────────────────
 
-def _circle_intersect(cx1, cy1, r1, cx2, cy2, r2, want_upper=True):
+def _circle_intersect(cx1, cy1, r1, cx2, cy2, r2, want_upper=True, near=None):
     """
     Return one intersection point of two circles.
     Raises ValueError if circles don't intersect.
@@ -59,6 +59,12 @@ def _circle_intersect(cx1, cy1, r1, cx2, cy2, r2, want_upper=True):
     my = cy1 + a * dy / d
     px =  h * dy / d
     py = -h * dx / d
+    if near is not None:
+        p_a = (mx + px, my + py)
+        p_b = (mx - px, my - py)
+        da = math.hypot(p_a[0] - near[0], p_a[1] - near[1])
+        db = math.hypot(p_b[0] - near[0], p_b[1] - near[1])
+        return p_a if da <= db else p_b
     if want_upper:
         if py < 0 or (py == 0 and px < 0):
             px, py = -px, -py
@@ -130,7 +136,8 @@ def fk_solve(cfg: dict, input_angles: dict) -> dict:
     # P2 — circle-circle intersection (C, P1)
     pts["P2"] = _circle_intersect(cx, cy, L("C", "P2"),
                                    p1x, p1y, L("P1", "P2"),
-                                   want_upper=True)
+                                   want_upper=True,
+                                   near=(p1x + (cx - qx), p1y + (cy - qy)))
     p2x, p2y = pts["P2"]
 
     # D — extend P2→P1 direction by |P1D|

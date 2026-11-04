@@ -6,6 +6,7 @@ run.py — drive the quadruped from the keyboard, no web server needed.
     j : jump straight up (only while stopped)
     space / x : stop (feet parked at the start of the gait path)
     q / Ctrl-C : stop and quit
+    z : strafe left            c : strafe right
 
 Motion latches: a key keeps the robot moving until you press another key, so
 there is no need to hold anything down (a terminal only reports key presses,
@@ -30,19 +31,23 @@ from serial_manager import get_manager, CONFIG_PATH
 
 # key -> (direction, turn), matching WalkController.start()
 KEYS = {
-    "w": (1, 0),
-    "s": (-1, 0),
-    "a": (0, -1),
-    "d": (0, 1),
-}
-LABELS = {
-    (1, 0): "forward",
-    (-1, 0): "backward",
-    (0, -1): "rotating left",
-    (0, 1): "rotating right",
-    (0, 0): "stopped",
+    "w": (1, 0, 0),
+    "s": (-1, 0, 0),
+    "a": (0, -1, 0),
+    "d": (0, 1, 0),
+    "z": (0, 0, -1),   # strafe left
+    "c": (0, 0, 1),    # strafe right
 }
 
+LABELS = {
+    (1, 0, 0): "forward",
+    (-1, 0, 0): "backward",
+    (0, -1, 0): "rotating left",
+    (0, 1, 0): "rotating right",
+    (0, 0, -1): "strafing left",
+    (0, 0, 1): "strafing right",
+    (0, 0, 0): "stopped",
+}
 
 def find_port(mgr) -> str:
     ports = mgr.list_ports()
@@ -86,7 +91,7 @@ def main() -> None:
 
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
-    current = (0, 0)
+    current = (0, 0, 0)
     try:
         tty.setcbreak(fd)
         status_line(LABELS[current])
@@ -97,7 +102,7 @@ def main() -> None:
             if ch in ("q", "\x03"):
                 break
             if ch == "j":
-                if current != (0, 0):
+                if current != (0, 0, 0):
                     continue  # stop before jumping
                 try:
                     walker.jump()
@@ -107,14 +112,14 @@ def main() -> None:
                     status_line("jumping")
                 continue
             if ch in (" ", "x"):
-                cmd = (0, 0)
+                cmd = (0, 0, 0)
             elif ch in KEYS:
                 cmd = KEYS[ch]
             else:
                 continue
             if cmd == current:
                 continue
-            if cmd == (0, 0):
+            if cmd == (0, 0, 0):
                 walker.stop()
             else:
                 walker.start(*cmd)

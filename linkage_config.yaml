@@ -5,6 +5,7 @@ end_effector: D
 
 # hip_fixed_deg: constant hip angle used for every leg until hip IK exists.
 hip_fixed_deg: 90.0
+hip_swing_max_deg: 30
 
 # legs: the quadruped's four legs. The points/edges/inputs block below is the
 # canonical LEFT-leg geometry, used AS-IS for every leg: a given foot target
@@ -39,6 +40,7 @@ hip_fixed_deg: 90.0
 legs:
   FL:
     side: left
+    hip_dir: 1         # flip to -1 if this leg's foot moves inward instead of outward
     channels: {theta1: 0,  theta_c: 1,  hip: 2}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
@@ -47,6 +49,7 @@ legs:
       hip:     {deg0: 0.0,   us0: 1850, deg1: 90.0, us1: 1200}
   BL:
     side: left
+    hip_dir: 1         # flip to -1 if this leg's foot moves inward instead of outward
     channels: {theta1: 3,  theta_c: 4,  hip: 5}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
@@ -55,14 +58,16 @@ legs:
       hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
   BR:
     side: right
+    hip_dir: 1         # flip to -1 if this leg's foot moves inward instead of outward
     channels: {theta1: 6,  theta_c: 7,  hip: 8}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90.0,  us0: 2420, deg1: 180.0, us1: 1785}
-      theta_c: {deg0: 0, us0: 1400, deg1: -90, us1: 2020}
-      hip:     {deg0: 0,   us0: 560, deg1: 90, us1: 1180}
+      theta1:  {deg0: 90.0,  us0: 2040, deg1: 180.0, us1: 1350}
+      theta_c: {deg0: 0, us0: 1670, deg1: -90, us1: 1020}
+      hip:     {deg0: 0,   us0: 1300, deg1: 90, us1: 1900}
   FR:
     side: right
+    hip_dir: 1         # flip to -1 if this leg's foot moves inward instead of outward
     channels: {theta1: 9,  theta_c: 10, hip: 11}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
@@ -89,6 +94,8 @@ gait:
     - [-1.939, -138.105]
     - [-21.489, -150.203]
     - [-25.678, -167.486]
+  lateral_scale: 1.0   # mm of sideways foot travel per mm of recorded x travel
+  strafe_sign: 1       # flip to -1 if strafing goes the wrong way
 
 # jump: a straight-up jump, all four legs in phase. Points are canonical-frame
 # [x, y] foot targets in mm (must be reachable), set via the Jump controls in

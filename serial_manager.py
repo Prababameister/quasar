@@ -36,6 +36,7 @@ import logging
 import pathlib
 import struct
 import threading
+import time
 from typing import Optional
 
 import serial
@@ -110,6 +111,7 @@ class SerialManager:
                 self._port.close()
                 log.info("Closed existing connection before opening new one")
             self._port = serial.Serial(port, baud, timeout=1)
+            time.sleep(2)   # UNO resets when the port opens; wait for it to boot
             log.info(f"Connected to {port} @ {baud}")
 
     def disconnect(self) -> None:

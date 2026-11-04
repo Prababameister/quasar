@@ -1,9 +1,10 @@
 """
-test_serial.py — interactively drive ONE leg of the quadruped over serial.
+test_serial.py - interactively drive ONE leg of the quadruped over serial.
 
 Usage:
-    .venv/bin/python test_serial.py --port /dev/ttyACM0
-    .venv/bin/python test_serial.py --port /dev/ttyACM0 --leg FR
+    uv run test_serial.py                      # auto-detect the Arduino's port
+    uv run test_serial.py --port COM4 --leg FR
+    uv run test_serial.py --dry-run            # no hardware, just print frames
 
 Goes through the same path as the web app: per-leg servo offsets and PCA9685
 channel map come from linkage_config.yaml, and every send transmits a full
@@ -18,7 +19,7 @@ At the prompt:
     <t1> <tc> [hip]     send joint angles in degrees
                         (hip defaults to hip_fixed_deg from the config)
     calc <t1> <tc> [hip]  compute the microseconds the active leg's offsets +
-                        calibration would produce for these angles — prints
+                        calibration would produce for these angles - prints
                         the result WITHOUT sending anything or needing a
                         connection. Use this to sanity-check a calibration
                         before trusting it on the real servo.
@@ -39,6 +40,7 @@ import threading
 import yaml
 
 from serial_manager import SerialManager
+from arduino_link import pick_port, firmware_boot_us
 from leg_kinematics import solve_leg, hip_fixed_deg, leg_names, nominal_target
 
 CONFIG_PATH = pathlib.Path(__file__).parent / "linkage_config.yaml"
@@ -82,7 +84,7 @@ def print_legs(cfg: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Single-leg serial tester.")
-    parser.add_argument("--port", default="/dev/ttyACM0", help="Serial port")
+    parser.add_argument("--port", default=None, help="Serial port, e.g. COM4 (default: auto-detect)")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--leg", default=None, help="Leg to start on (default: first)")
     parser.add_argument("--dry-run", action="store_true",
@@ -106,11 +108,31 @@ def main() -> None:
             def read(self, n=1): return b""
             def close(self): pass
         mgr._port = _DryPort()
-        print(f"Dry run — no port opened. Active leg: {leg}")
+        print(f"Dry run - no port opened. Active leg: {leg}")
     else:
-        print(f"Connecting to {args.port} @ {args.baud}…")
-        mgr.connect(args.port, args.baud)
+        port = pick_port(args.port)
+        if not port:
+            raise SystemExit("No port to open - pass --port COMx, or use --dry-run.")
+        print(f"Connecting to {port} @ {args.baud}...")
+        try:
+            mgr.connect(port, args.baud)
+        except Exception as e:
+            msg = str(e)
+            if "Access is denied" in msg or "PermissionError" in msg:
+                raise SystemExit(
+                    f"{port} is busy - another program has it open. Close the Arduino IDE "
+                    "Serial Monitor/Plotter, fk_interactive.py / ik_interactive.py, "
+                    "server.py, or any other serial tool, then try again.")
+            raise SystemExit(f"Could not open {port}: {msg}")
         print(f"Connected. Active leg: {leg}")
+    # Every frame carries all 12 channels: start from the firmware's boot
+    # values so the first send doesn't move the channels you didn't touch.
+    boot = firmware_boot_us()
+    if boot:
+        mgr._last_us = boot
+    else:
+        print("WARNING: couldn't read chan[] from cobs_motor_prog.ino; "
+              "other channels may jump on the first send.")
     print("Type 'pwm ch us', 't1 tc [hip]', 'calc t1 tc [hip]', 'ik x y', "
           "'leg <name>', 'legs', 'n', 'r', or 'q'.\n")
 
@@ -121,7 +143,11 @@ def main() -> None:
     hip = hip_fixed_deg(cfg)
 
     def send(t1: float, tc: float, h: float) -> None:
-        mgr.send_leg(cfg, leg, t1, tc, h)
+        try:
+            mgr.send_leg(cfg, leg, t1, tc, h)
+        except Exception as e:
+            print(f"  NOT sent: {e}")
+            return
         print(f"  sent {leg}: t1={t1:.1f}  tc={tc:.1f}  hip={h:.1f}")
 
     try:
@@ -164,7 +190,7 @@ def main() -> None:
                     mgr.send_raw(channel, us)
                     print(f"  sent raw ch={channel}: {us} us "
                           f"(clamped to {max(500, min(2500, us))})")
-                except (ValueError, RuntimeError) as e:
+                except Exception as e:
                     print(f"  {e}")
                 continue
 
@@ -200,7 +226,7 @@ def main() -> None:
             if cmd in ("n", "neutral"):
                 res = solve_leg(cfg, leg, *nominal_target(cfg))
                 if not res["valid"]:
-                    print("  nominal gait stance unreachable — not sent")
+                    print("  nominal gait stance unreachable - not sent")
                     continue
                 send(res["theta1"], res["theta_c"], res["hip"])
                 continue
@@ -220,7 +246,7 @@ def main() -> None:
                 if res["valid"]:
                     send(res["theta1"], res["theta_c"], res["hip"])
                 else:
-                    print("  not sent (unreachable) — send explicit angles to override")
+                    print("  not sent (unreachable) - send explicit angles to override")
                 continue
 
             # Otherwise: bare angles "t1 tc [hip]"

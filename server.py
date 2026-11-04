@@ -190,6 +190,7 @@ class LegSendRequest(BaseModel):
 class DirectionRequest(BaseModel):
     direction: int = 0
     turn: int = 0
+    strafe: int = 0
 
 class GaitParamsRequest(BaseModel):
     cycle_time_s: float | None = None
@@ -271,7 +272,7 @@ def leg_send(req: LegSendRequest):
 @app.post("/walk/start")
 def walk_start(req: DirectionRequest):
     try:
-        _walker.start(req.direction, req.turn)
+        _walker.start(req.direction, req.turn, req.strafe)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
@@ -280,7 +281,7 @@ def walk_start(req: DirectionRequest):
 @app.post("/walk/direction")
 def walk_direction(req: DirectionRequest):
     try:
-        _walker.set_direction(req.direction, req.turn)
+        _walker.set_direction(req.direction, req.turn, req.strafe)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _walker.status()
