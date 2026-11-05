@@ -44,8 +44,8 @@ legs:
     channels: {theta1: 0,  theta_c: 1,  hip: 2}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90,  us0: 500, deg1: 180.0, us1: 1140}
-      theta_c: {deg0: -90, us0: 500, deg1: 0, us1: 1140}
+      theta1:  {deg0: 0.0,  us0: 1140, deg1: 90.0, us1: 500}
+      theta_c: {deg0: 0.0, us0: 1120, deg1: 90.0, us1: 500}
       hip:     {deg0: 0.0,   us0: 1850, deg1: 90.0, us1: 1200}
   BL:
     side: left
@@ -53,8 +53,8 @@ legs:
     channels: {theta1: 3,  theta_c: 4,  hip: 5}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90.0,  us0: 580, deg1: 180.0, us1: 1200}
-      theta_c: {deg0: 0.0, us0: 1230, deg1: -90.0, us1: 575}
+      theta1:  {deg0: 0.0,  us0: 1340, deg1: 180.0, us1: 700}
+      theta_c: {deg0: 0.0, us0: 1210, deg1: -90.0, us1: 500}
       hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
   BR:
     side: right
@@ -62,18 +62,18 @@ legs:
     channels: {theta1: 6,  theta_c: 7,  hip: 8}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90.0,  us0: 2040, deg1: 180.0, us1: 1350}
-      theta_c: {deg0: 0, us0: 1670, deg1: -90, us1: 1020}
-      hip:     {deg0: 0,   us0: 1300, deg1: 90, us1: 1900}
+      theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2140}
+      theta_c: {deg0: 0, us0: 1580, deg1: 90, us1: 2260}
+      hip:     {deg0: 0,   us0: 580, deg1: 90, us1: 1220}
   FR:
     side: right
     hip_dir: 1         # flip to -1 if this leg's foot moves inward instead of outward
     channels: {theta1: 9,  theta_c: 10, hip: 11}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90.0,  us0: 2310, deg1: 180.0, us1: 1700}
-      theta_c: {deg0: -90.0,  us0: 1960,  deg1: 0.0, us1: 1300}
-      hip:     {deg0: 0.0,   us0: 550,  deg1: 90.0, us1: 1166}
+      theta1:  {deg0: 90.0,  us0: 1970, deg1: 0.0, us1: 1260}
+      theta_c: {deg0: 90.0,  us0: 2330,  deg1: 0.0, us1: 1720}
+      hip:     {deg0: 0.0,   us0: 550,  deg1: 90.0, us1: 1200}
 
 # gait: diagonal-trot walking driven by a hand-placed foot path. `waypoints` is
 # a closed loop of [x, y] points in the canonical left-leg frame (D.x forward,
