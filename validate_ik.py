@@ -24,7 +24,8 @@ import yaml
 import matplotlib.pyplot as plt
 
 from leg_kinematics import (solve_leg, solve_leg_3d, fk_leg, leg_names,
-                            leg_side, hip_dir, hip_fixed_deg, nominal_target)
+                            leg_side, nominal_target, leg_plane_to_3d,
+                            hip_offset_mm)
 from workspace import compute_workspace
 
 CFG = yaml.safe_load(open("linkage_config.yaml"))
@@ -99,11 +100,9 @@ for servo in ("theta1", "theta_c", "hip"):
 # 4. 3D / lateral hip test ----------------------------------------------------
 def to_3d(leg, pts, hip_deg):
     """canonical (x,y) points -> body frame (X fwd, Y left, Z up)."""
-    s = 1.0 if leg_side(CFG, leg) == "left" else -1.0
-    swing = math.radians((hip_deg - hip_fixed_deg(CFG)) / hip_dir(CFG, leg))
     mx, my = MOUNT[leg]
-    return {k: np.array([mx + p["x"], my + s * (-p["y"]) * math.sin(swing),
-                         p["y"] * math.cos(swing)]) for k, p in pts.items()}
+    return {k: np.array(leg_plane_to_3d(CFG, leg, p["x"], p["y"], hip_deg)) + [mx, my, 0.0]
+            for k, p in pts.items()}
 
 
 print("\n[4] 3D lateral test (foot 20 mm outward)")
@@ -114,7 +113,7 @@ for leg in leg_names(CFG):
     foot = to_3d(leg, pts, r["hip"])["D"]
     mx, my = MOUNT[leg]
     s = 1.0 if leg_side(CFG, leg) == "left" else -1.0
-    want = np.array([mx + nx, my + s * 20.0, ny])
+    want = np.array([mx + nx, my + s * (hip_offset_mm(CFG) + 20.0), ny])
     err = np.linalg.norm(foot - want)
     check(f"{leg} foot at requested spot", err < 2.5,
           f"(err {err:.2f} mm, hip {r['hip']:.1f} deg)")
