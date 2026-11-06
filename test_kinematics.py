@@ -11,7 +11,7 @@ import struct
 import yaml
 from cobs import cobs
 
-from leg_kinematics import solve_leg, fk_leg, leg_names
+from leg_kinematics import solve_leg, fk_leg, leg_names, calibration_frame, solver_to_hw
 from gait import leg_direction, foot_offset, _gait_params, _PHASE_OFFSET
 from serial_manager import SerialManager, _deg_to_us, N_CHANNELS
 
@@ -141,9 +141,12 @@ us = struct.unpack(">" + "H" * N_CHANNELS, payload)
 # check the FL channels carry the expected microseconds
 fl = CFG["legs"]["FL"]["channels"]
 fl_cal = CFG["legs"]["FL"]["calibration"]
-exp_t1 = _deg_to_us(150.0, fl_cal["theta1"]["deg0"], fl_cal["theta1"]["us0"],
+# send_legs takes solver-frame angles; the calibration may be in the hardware frame
+_hw = (lambda t1, tc: solver_to_hw(t1, tc)) if calibration_frame(CFG) == "hardware" else (lambda t1, tc: (t1, tc))
+_t1_cal, _tc_cal = _hw(150.0, -10.0)
+exp_t1 = _deg_to_us(_t1_cal, fl_cal["theta1"]["deg0"], fl_cal["theta1"]["us0"],
                     fl_cal["theta1"]["deg1"], fl_cal["theta1"]["us1"])
-exp_tc = _deg_to_us(-10.0, fl_cal["theta_c"]["deg0"], fl_cal["theta_c"]["us0"],
+exp_tc = _deg_to_us(_tc_cal, fl_cal["theta_c"]["deg0"], fl_cal["theta_c"]["us0"],
                     fl_cal["theta_c"]["deg1"], fl_cal["theta_c"]["us1"])
 exp_hip = _deg_to_us(90.0, fl_cal["hip"]["deg0"], fl_cal["hip"]["us0"],
                      fl_cal["hip"]["deg1"], fl_cal["hip"]["us1"])
@@ -160,7 +163,7 @@ cfg2["legs"]["FL"]["offsets"]["theta1_deg"] = 12.0
 mgr2.send_legs(cfg2, {"FL": (150.0, -10.0, 90.0)})
 us2 = struct.unpack(">" + "H" * N_CHANNELS, cobs.decode(fp2.written[:-1]))
 check("theta1 offset shifts the pulse",
-      us2[fl["theta1"]] == _deg_to_us(162.0, fl_cal["theta1"]["deg0"], fl_cal["theta1"]["us0"],
+      us2[fl["theta1"]] == _deg_to_us(_t1_cal + 12.0, fl_cal["theta1"]["deg0"], fl_cal["theta1"]["us0"],
                                        fl_cal["theta1"]["deg1"], fl_cal["theta1"]["us1"]),
       (us2[fl["theta1"]],))
 

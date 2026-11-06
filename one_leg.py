@@ -9,6 +9,7 @@ import yaml
 import matplotlib.pyplot as plt
 
 from leg_kinematics import solve_leg, fk_leg
+from serial_manager import SerialManager
 
 LEG = "FL"       # FL, FR, BL or BR
 PLOT = True
@@ -17,10 +18,9 @@ CFG = yaml.safe_load(open("linkage_config.yaml"))
 leg_cfg = CFG["legs"][LEG]
 
 
-def approx_us(servo, deg):
-    """Approximate pulse (us) from this leg's two-point calibration."""
-    c = leg_cfg["calibration"][servo]
-    return c["us0"] + (deg - c["deg0"]) * (c["us1"] - c["us0"]) / (c["deg1"] - c["deg0"])
+def leg_us(r):
+    """Exactly the pulses send_leg() would use (offsets + calibration frame + calibration)."""
+    return SerialManager().compute_leg_us(CFG, LEG, r["theta1"], r["theta_c"], r["hip"])
 
 
 print(f"Leg {LEG} ({leg_cfg['side']}), channels {leg_cfg['channels']}\n")
@@ -31,9 +31,8 @@ d = fk_leg(CFG, LEG, r["theta1"], r["theta_c"])["points"]["D"]
 print(f"  target   ({x:.2f}, {y:.2f})")
 print(f"  IK       theta1 {r['theta1']:.2f}  theta_c {r['theta_c']:.2f}  hip {r['hip']:.1f}")
 print(f"  FK foot  ({d['x']:.2f}, {d['y']:.2f})   error {r['error_mm']:.2f} mm   valid={r['valid']}")
-print(f"  pulses   theta1 {approx_us('theta1', r['theta1']):.0f} us   "
-      f"theta_c {approx_us('theta_c', r['theta_c']):.0f} us   "
-      f"hip {approx_us('hip', r['hip']):.0f} us")
+us = leg_us(r)
+print(f"  pulses   theta1 {us['theta1']} us   theta_c {us['theta_c']} us   hip {us['hip']} us")
 
 print("\nSTEP 2 - whole gait loop on this leg:")
 for x, y in CFG["gait"]["waypoints"]:

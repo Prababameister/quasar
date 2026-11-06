@@ -13,7 +13,7 @@ static unsigned long ledOffAt = 0;
 
 // Last commanded pulse width per PCA9685 channel (0..11). Neutral on boot.
 static uint16_t chan[NUM_CHANNELS] = {
-  2040, 1670, 1300, 580, 575, 1166, 2040, 1670, 1300, 2310, 1960, 1166
+  500, 500, 1200, 700, 500, 1150, 2140, 2260, 1200, 1970, 2330, 1166
 };
 
 // ---------------------------------------------------------------------------

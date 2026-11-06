@@ -38,7 +38,6 @@ BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
 LIMITS = {i["name"]: (i.get("min_deg", -999), i.get("max_deg", 999)) for i in CFG["inputs"]}
 SWING_MAX = float(CFG.get("hip_swing_max_deg", 30.0))
 HIP0 = hip_fixed_deg(CFG)
-OFFSET_KEY = {"theta1": "theta1_deg", "theta_c": "thetac_deg", "hip": "hip_deg"}
 
 state = {"leg": "FL"}
 
@@ -72,10 +71,9 @@ send_box = CheckButtons(fig.add_axes([0.84, 0.10, 0.14, 0.06]), ["Send to Arduin
                         [LINK.enabled])
 
 
-def approx_us(leg, servo, deg):
-    cal = CFG["legs"][leg]["calibration"][servo]
-    deg = deg + float(CFG["legs"][leg]["offsets"].get(OFFSET_KEY[servo], 0.0))
-    return cal["us0"] + (deg - cal["deg0"]) * (cal["us1"] - cal["us0"]) / (cal["deg1"] - cal["deg0"])
+def approx_us(leg, servo, t1, tc, hip):
+    """Exactly the pulse send_leg() would use (offsets + calibration frame + calibration)."""
+    return LINK.mgr.compute_leg_us(CFG, leg, t1, tc, hip)[servo]
 
 
 def to_3d(leg, pts, hip_deg):
@@ -149,9 +147,9 @@ def update(_=None):
         f"in leg plane: x {pts['D']['x']:.1f}  y {pts['D']['y']:.1f}", "",
         f"bar-length check: worst dev {worst:.4f} mm  {'OK' if worst < 0.01 else 'BAD'}", "",
         "approx servo pulses (us):",
-        f"  theta1  {approx_us(leg, 'theta1', t1):6.0f}",
-        f"  theta_c {approx_us(leg, 'theta_c', tc):6.0f}",
-        f"  hip     {approx_us(leg, 'hip', hip):6.0f}", "",
+        f"  theta1  {approx_us(leg, 'theta1', t1, tc, hip):6.0f}",
+        f"  theta_c {approx_us(leg, 'theta_c', t1, tc, hip):6.0f}",
+        f"  hip     {approx_us(leg, 'hip', t1, tc, hip):6.0f}", "",
     ]
     warn = []
     if abs(hip - HIP0) > SWING_MAX:

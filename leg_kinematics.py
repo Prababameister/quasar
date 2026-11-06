@@ -92,6 +92,44 @@ def fk_leg(cfg: dict, leg: str, theta1: float, theta_c: float) -> dict:
                    for name, (px, py) in pts.items()},
     }
 
+def calibration_frame(cfg: dict) -> str:
+    """Which angle frame legs.<leg>.calibration is written in: "solver" or "hardware"."""
+    return str(cfg.get("calibration_frame", "solver"))
+
+
+def solver_to_hw(theta1: float, theta_c: float) -> tuple[float, float]:
+    """
+    Solver-frame joint angles -> the HARDWARE frame the servos are calibrated in.
+
+    Solver frame: standard math angles in the leg plane (+x forward, +y up).
+      theta1  = horn servo  (O -> A)
+      theta_c = thigh servo (Q -> P1)
+    Hardware frame (the 'Quadruped V1 Documentation' convention):
+      horn  (config key theta1):  0 = level, pointing back;    90 = pointing up
+      thigh (config key theta_c): 0 = level, pointing forward; 90 = straight down
+    Hip is the same in both frames (90 = leg hanging straight down).
+    """
+    return _wrap180(180.0 - theta1), _wrap180(-theta_c)
+
+
+def hw_to_solver(horn_hw: float, thigh_hw: float) -> tuple[float, float]:
+    """Inverse of solver_to_hw, returned inside the solver's input limits (theta1 in 90..360)."""
+    t1 = (180.0 - horn_hw) % 360.0
+    return (t1 + 360.0 if t1 < 90.0 else t1), -thigh_hw
+
+
+def _wrap180(deg: float) -> float:
+    return (deg + 180.0) % 360.0 - 180.0
+
+
+def x_forward_sign(cfg: dict, leg: str) -> float:
+    """+1 if the solver's +x is the robot's FRONT for this leg, -1 if it is the BACK."""
+    v = float(cfg["legs"][leg].get("x_forward_sign", cfg.get("x_forward_sign", 1.0)))
+    if v not in (1.0, -1.0):
+        raise ValueError(f"legs.{leg}.x_forward_sign must be 1 or -1, got {v}")
+    return v
+
+
 def hip_dir(cfg: dict, leg: str) -> float:
     """+1/-1: which way the hip servo angle moves for an OUTWARD foot shift."""
     return float(cfg["legs"][leg].get("hip_dir", 1.0))

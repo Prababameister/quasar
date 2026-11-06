@@ -43,6 +43,8 @@ import serial
 import serial.tools.list_ports
 from cobs import cobs
 
+from leg_kinematics import calibration_frame, solver_to_hw
+
 log = logging.getLogger("serial_manager")
 
 CONFIG_PATH = pathlib.Path(__file__).parent / "linkage_config.yaml"
@@ -146,6 +148,14 @@ class SerialManager:
             raise ValueError(f"Unknown leg '{leg}' in config")
         off = lc.get("offsets", {})
         cal = lc.get("calibration", {})
+        # Callers always pass solver-frame angles. If the calibration was
+        # recorded in the hardware frame, convert first (offsets then apply
+        # in that same hardware frame).
+        if calibration_frame(cfg) == "hardware":
+            theta1, theta_c = solver_to_hw(theta1, theta_c)
+        elif calibration_frame(cfg) != "solver":
+            raise ValueError(f"calibration_frame must be 'solver' or 'hardware', "
+                             f"got {calibration_frame(cfg)!r}")
         return {
             "theta1":  self._joint_us(cal, "theta1", theta1 + float(off.get("theta1_deg", 0.0))),
             "theta_c": self._joint_us(cal, "theta_c", theta_c + float(off.get("thetac_deg", 0.0))),
