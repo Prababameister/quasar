@@ -6,6 +6,9 @@ end_effector: D
 # hip_fixed_deg: constant hip angle used for every leg until hip IK exists.
 hip_fixed_deg: 90.0
 hip_swing_max_deg: 30
+# hip_offset_mm: sideways distance from the hip servo's rotation axis to the
+# leg's plane (the thigh pivot), measured on the robot.
+hip_offset_mm: 41.0
 
 # legs: the quadruped's four legs. The points/edges/inputs block below is the
 # canonical LEFT-leg geometry, used AS-IS for every leg: a given foot target
@@ -172,19 +175,19 @@ edges:
     length: 31.955
   - from: Q
     to: P1
-    length: 113.748
+    length: 157.0      # thigh (measured)
   - from: Q
     to: C
     length: 31.607
   - from: C
     to: P2
-    length: 113.748
+    length: 157.0      # knee rod, parallel to and same length as the thigh
   - from: P1
     to: P2
     length: 31.305
   - from: P1
     to: D
-    length: 137.733
+    length: 125.0      # shin (measured)
 
 inputs:
   - name: theta1

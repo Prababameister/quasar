@@ -97,22 +97,67 @@ def hip_dir(cfg: dict, leg: str) -> float:
     return float(cfg["legs"][leg].get("hip_dir", 1.0))
 
 
+def hip_offset_mm(cfg: dict) -> float:
+    """Sideways distance from the hip servo's rotation axis to the leg plane."""
+    return float(cfg.get("hip_offset_mm", 0.0))
+
+
+def leg_plane_to_3d(cfg: dict, leg: str, px: float, py: float, hip_deg: float):
+    """
+    A point (px, py) in the leg's own plane -> leg-local 3D (X fwd, Y, Z up),
+    hip axis at the origin. Y is +left, so right legs go toward -Y.
+
+    The hip offset is a rigid bar fixed at a CONSTANT 90 deg to the leg plane:
+    it runs from the hip axis (along X) to the leg-plane origin. Swinging the
+    hip rotates the bar and the leg together about X, so the bar always stays
+    perpendicular to the leg. A positive swing moves the foot outward.
+    """
+    s = 1.0 if leg_side(cfg, leg) == "left" else -1.0
+    phi = math.radians((hip_deg - hip_fixed_deg(cfg)) / hip_dir(cfg, leg))
+    d = hip_offset_mm(cfg)
+    # bar direction (cos, sin) and leg-down direction (sin, -cos) are perpendicular
+    out = d * math.cos(phi) - py * math.sin(phi)
+    z = d * math.sin(phi) + py * math.cos(phi)
+    return (px, s * out, z)
+
+
 def solve_leg_3d(cfg: dict, leg: str, x: float, y: float, lateral: float = 0.0) -> dict:
     """
     x, y    : canonical sagittal target (same as solve_leg; y negative = below hip)
-    lateral : mm the foot sits OUTWARD of the leg's vertical plane (>0 = away from body)
-    Returns the solve_leg dict, but with "hip" computed instead of fixed.
+    lateral : mm the foot sits OUTWARD of the leg's neutral (hip = hip_fixed_deg)
+              vertical plane (>0 = away from body). With a hip offset d, the
+              foot is therefore d + lateral outward of the hip axis.
+    Returns the solve_leg dict, but with "hip" computed instead of fixed, plus
+    "swing_deg" (unclamped swing) and "reach" (in-plane depth that was solved).
     """
     if lateral == 0.0:
-        return solve_leg(cfg, leg, x, y)  # identical to current behaviour
+        res = solve_leg(cfg, leg, x, y)  # identical to current behaviour
+        res["swing_deg"] = 0.0
+        res["reach"] = -y
+        return res
 
+    # The offset bar stays at 90 deg to the leg, so in the hip's cross-section
+    # the foot is the corner of a right triangle: legs d (bar) and reach (leg).
+    d = hip_offset_mm(cfg)
+    out = d + lateral                     # foot distance outward of the hip axis
     depth = -y
-    phi = math.atan2(lateral, depth)      # tilt of leg plane from vertical
-    reach = math.hypot(lateral, depth)    # leg length needed in the tilted plane
+    reach = math.sqrt(max(out * out + depth * depth - d * d, 0.0))
+    # foot angle about the hip axis, minus the angle the bar itself takes up
+    phi = math.atan2(out, depth) - math.atan2(d, reach)
 
     res = solve_leg(cfg, leg, x, -reach)  # planar IK, unchanged
     limit = float(cfg.get("hip_swing_max_deg", 30.0))
     swing = max(-limit, min(limit, math.degrees(phi)))
     res["hip"] = hip_fixed_deg(cfg) + hip_dir(cfg, leg) * swing
     res["lateral"] = lateral
+    res["swing_deg"] = math.degrees(phi)
+    res["reach"] = reach
     return res
+
+
+def lateral_for_swing(cfg: dict, y: float, swing_deg: float) -> float:
+    """Inverse of solve_leg_3d's hip: the lateral that gives this swing at height y."""
+    d = hip_offset_mm(cfg)
+    phi = math.radians(swing_deg)
+    reach = (d * math.sin(phi) - y) / math.cos(phi)
+    return d * math.cos(phi) + reach * math.sin(phi) - d
