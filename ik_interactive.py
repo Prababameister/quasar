@@ -170,17 +170,19 @@ def update(_=None):
     ax2d.set_aspect("equal"); ax2d.set_xlabel("X (robot front ->)")
     ax2d.set_title("Leg plane (2D linkage)"); ax2d.legend(loc="upper right", fontsize=8)
 
-    # ---- Y-Z: looking along the hip axis (front view), Y = outward from body
+    # ---- Y-Z: looking along the hip axis (front view), Y = robot Y (+left), so
+    # a left leg sits on +Y with the hip to its left, a right leg on -Y with the
+    # hip to its right
     def yz(p):
-        return s * p[1], p[2]
+        return p[1], p[2]
     h0 = np.array(yz(p3["H0"]))
     n0 = np.linalg.norm(h0)
     if n0 > 1e-9:
         u_bar = h0 / n0                           # hip axis -> leg plane
     else:                                         # hip_offset_mm = 0: use the leg's own rotation
         phi = math.radians(r["hip"] - float(CFG.get("hip_fixed_deg", 90.0)))
-        u_bar = np.array([math.cos(phi), math.sin(phi)])
-    u_leg = np.array([u_bar[1], -u_bar[0]])       # leg-plane "down", exactly 90 deg to the bar
+        u_bar = np.array([s * math.cos(phi), math.sin(phi)])
+    u_leg = s * np.array([u_bar[1], -u_bar[0]])   # leg-plane "down", exactly 90 deg to the bar
     for a, b in BARS:
         axyz.plot(*zip(yz(p3[a]), yz(p3[b])), "b-")
     axyz.plot([0, h0[0]], [0, h0[1]], "k-", lw=3, label="hip offset")
@@ -193,8 +195,8 @@ def update(_=None):
     axyz.scatter(*yz(foot), c="r", s=40, label="foot")
     axyz.scatter(*yz(want), c="g", marker="x", s=80, label="target")
     axyz.axhline(0, c="lightgray", lw=0.5); axyz.axvline(0, c="lightgray", lw=0.5)
-    axyz.set_xlim(-60, 160); axyz.set_ylim(-280, 80); axyz.set_aspect("equal")
-    axyz.set_xlabel("Y outward (mm)"); axyz.set_ylabel("Z (mm)")
+    axyz.set_xlim(*((-60, 160) if s > 0 else (-160, 60))); axyz.set_ylim(-280, 80); axyz.set_aspect("equal")
+    axyz.set_xlabel("Y (mm, + = robot left)"); axyz.set_ylabel("Z (mm)")
     axyz.set_title("Front view (Y-Z)"); axyz.legend(loc="upper right", fontsize=7)
     foot_dir = np.array(yz(foot)) - h0
     bar_leg_deg = math.degrees(math.atan2(abs(u_bar[1] * foot_dir[0] - u_bar[0] * foot_dir[1]),
