@@ -83,8 +83,8 @@ legs:
     channels: {theta1: 4,  theta_c: 3,  hip: 5}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 0.0,  us0: 1250, deg1: 90.0, us1: 600}
-      theta_c: {deg0: 0.0, us0: 1210, deg1: 90.0, us1: 500}
+      theta1:  {deg0: 0.0,  us0: 1750, deg1: 90.0, us1: 2190}
+      theta_c: {deg0: 0.0, us0: 1370, deg1: 90.0, us1: 680}
       hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
   BR:
     side: right
