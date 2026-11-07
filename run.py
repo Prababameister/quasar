@@ -67,7 +67,7 @@ WALK_GAITS = {"1": "walk", "2": "trot", "3": "pace", "4": "bound", "5": "pronk"}
 
 # Base speeds at speed factor 1.0 (the generator scales these down further if a
 # stride would be longer than gait_gen.max_step_mm).
-FWD_MM_S = 60.0
+FWD_MM_S = 90.0
 STRAFE_MM_S = 40.0
 TURN_DEG_S = 30.0
 
