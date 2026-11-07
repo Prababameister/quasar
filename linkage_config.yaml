@@ -84,7 +84,7 @@ legs:
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 0.0,  us0: 1250, deg1: 90.0, us1: 600}
-      theta_c: {deg0: 0.0, us0: 1210, deg1: 90.0, us1: 500}
+      theta_c: {deg0: 0.0, us0: 1150, deg1: 90.0, us1: 520}
       hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
   BR:
     side: right
@@ -94,7 +94,7 @@ legs:
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2140}
-      theta_c: {deg0: 0, us0: 1580, deg1: 90, us1: 2260}
+      theta_c: {deg0: 0, us0: 1580, deg1: 90, us1: 2240}
       hip:     {deg0: 0,   us0: 580, deg1: 90, us1: 1220}
   FR:
     side: right
