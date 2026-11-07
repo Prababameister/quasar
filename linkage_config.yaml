@@ -70,7 +70,7 @@ legs:
     side: left
     x_forward_sign: +1  # flipped 2026-11-05 after robot test (was -1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
-    channels: {theta1: 0,  theta_c: 1,  hip: 2}
+    channels: {theta1: 1,  theta_c: 0,  hip: 2}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 0.0,  us0: 1140, deg1: 90.0, us1: 500}
@@ -80,17 +80,17 @@ legs:
     side: left
     x_forward_sign: +1  # flipped 2026-11-05 after robot test (was -1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
-    channels: {theta1: 3,  theta_c: 4,  hip: 5}
+    channels: {theta1: 4,  theta_c: 3,  hip: 5}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 0.0,  us0: 1340, deg1: 180.0, us1: 700}
-      theta_c: {deg0: 0.0, us0: 1210, deg1: -90.0, us1: 500}
+      theta1:  {deg0: 0.0,  us0: 1250, deg1: 90.0, us1: 600}
+      theta_c: {deg0: 0.0, us0: 1210, deg1: 90.0, us1: 500}
       hip:     {deg0: 0.0,   us0: 1800, deg1: 90.0, us1: 1150}
   BR:
     side: right
     x_forward_sign: -1  # flipped 2026-11-05 after robot test (was +1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
-    channels: {theta1: 6,  theta_c: 7,  hip: 8}
+    channels: {theta1: 7,  theta_c: 6,  hip: 8}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2140}
@@ -100,7 +100,7 @@ legs:
     side: right
     x_forward_sign: -1  # flipped 2026-11-05 after robot test (was +1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
-    channels: {theta1: 9,  theta_c: 10, hip: 11}
+    channels: {theta1: 10, theta_c: 9,  hip: 11}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 90.0,  us0: 1970, deg1: 0.0, us1: 1260}
