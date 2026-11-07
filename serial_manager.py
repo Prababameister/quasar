@@ -152,7 +152,7 @@ class SerialManager:
         # recorded in the hardware frame, convert first (offsets then apply
         # in that same hardware frame).
         if calibration_frame(cfg) == "hardware":
-            theta1, theta_c = solver_to_hw(theta1, theta_c)
+            theta1, theta_c = solver_to_hw(theta1, theta_c, cfg, leg)
         elif calibration_frame(cfg) != "solver":
             raise ValueError(f"calibration_frame must be 'solver' or 'hardware', "
                              f"got {calibration_frame(cfg)!r}")

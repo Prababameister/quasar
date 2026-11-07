@@ -68,7 +68,7 @@ calibration_frame: hardware
 legs:
   FL:
     side: left
-    x_forward_sign: +1  # flipped 2026-11-05 after robot test (was -1)
+    x_forward_sign: -1  # flipped 2026-11-05 after robot test (was -1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
     channels: {theta1: 1,  theta_c: 0,  hip: 2}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
@@ -78,7 +78,7 @@ legs:
       hip:     {deg0: 0.0,   us0: 1850, deg1: 90.0, us1: 1200}
   BL:
     side: left
-    x_forward_sign: +1  # flipped 2026-11-05 after robot test (was -1)
+    x_forward_sign: -1  # flipped 2026-11-05 after robot test (was -1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
     channels: {theta1: 4,  theta_c: 3,  hip: 5}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
@@ -93,8 +93,8 @@ legs:
     channels: {theta1: 7,  theta_c: 6,  hip: 8}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2140}
-      theta_c: {deg0: 0, us0: 1580, deg1: 90, us1: 2260}
+      theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2190}
+      theta_c: {deg0: 0, us0: 1580, deg1: 90, us1: 2240}
       hip:     {deg0: 0,   us0: 580, deg1: 90, us1: 1220}
   FR:
     side: right
@@ -103,8 +103,8 @@ legs:
     channels: {theta1: 10, theta_c: 9,  hip: 11}
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
-      theta1:  {deg0: 90.0,  us0: 1970, deg1: 0.0, us1: 1260}
-      theta_c: {deg0: 90.0,  us0: 2330,  deg1: 0.0, us1: 1720}
+      theta_c:  {deg1: 90.0,  us1: 1970, deg0: 0.0, us0: 1300}
+      theta1: {deg1: 90.0,  us1: 2330,  deg0: 0.0, us0: 1720}
       hip:     {deg0: 0.0,   us0: 550,  deg1: 90.0, us1: 1200}
 
 # gait: diagonal-trot walking driven by a hand-placed foot path. `waypoints` is
@@ -145,32 +145,6 @@ jump:
   extend:  [-5.0, -170.0]
   crouch_time_s: 0.5
   extend_hold_s: 0.15
-
-# gait_gen: PARAMETRIC gait (gait_generator.py / gait_sim.py). Independent of
-# the hand-placed `gait:` loop above, which gait.py / the web UI still use.
-# Foot paths are generated from these numbers: straight constant-speed stance
-# (no foot slip) + cycloid swing. Uses each leg's x_forward_sign.
-gait_gen:
-  gait: trot               # walk | trot | pace | bound | pronk | strafe_left | strafe_right | jump
-                           # jump: crouch/extend depths come from the jump: block above,
-                           # or set jump_crouch_mm / jump_extend_mm / jump_crouch_frac here
-  cycle_time_s: 0.8        # one full stride
-  duty_factor: 0           # fraction of cycle a foot is on the ground; 0 = gait default (walk 0.8, trot 0.6)
-  step_height_mm: 25       # swing foot lift
-  neutral_x_mm: -5         # canonical-frame foot x at mid-stance (same frame as jump.neutral)
-  stand_height_mm: 155     # feet this far below the hips
-  stance_width_mm: 0       # extra outward foot offset
-  max_step_mm: 60          # longest stance stroke; commanded speeds are scaled down to fit
-  body_length_mm: 200      # front hip axis -> back hip axis   (PLACEHOLDER - measure the robot)
-  body_width_mm: 100       # left hip axis -> right hip axis   (PLACEHOLDER - measure the robot)
-  max_accel_mm_s2: 300     # speed ramp
-  max_yaw_accel_rad_s2: 3.0
-  update_rate_hz: 30
-  # Which way the linkage's +x (the knee side) faces on the robot, for the gait
-  # generator + simulator ONLY (ik_interactive.py keeps using legs.<leg>.x_forward_sign).
-  # -1 = knee points to the robot's BACK. All four knees face backward.
-  # A single number applies to every leg; or give {FL: -1, FR: -1, BL: -1, BR: -1}.
-  x_forward_sign: -1
 
 # viewport: canvas bounds in mm (adjust to fit your mechanism)
 viewport:

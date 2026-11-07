@@ -24,13 +24,41 @@ Controls: gait type (strafe_left / strafe_right turn the vx slider into sideways
 speed), body speed (vx fwd, vy left, turn), cycle time, duty factor
 (0 = gait default), step height, stand height, sim speed. Keyboard:
   space = play/pause   arrows = drive (up/down vx, left/right turn)   r = reset
+  [ / ] = gait period -/+ 0.05 s
 
 ARDUINO: if connected, tick "Send to Arduino" to stream the same frames to the
 robot (off by default). Frames with any unreachable leg are never sent.
+
+STREAMING: the window only redraws a few times a second, so sending one pose
+per redraw would make every servo jump to each pose at full speed. Instead,
+every redraw steps the gait in small sub-steps (KEY_S) and queues each one as
+a WAYPOINT (all 12 pulse widths, time-stamped). A background thread plays the
+waypoints back in real time at OUT_HZ, LINEARLY INTERPOLATING the pulses
+between neighbouring waypoints, so the Arduino gets every point in between.
+Playback runs a little behind the simulation (about two redraws) so the next
+waypoint is always already queued.
+
+GAIT PERIOD: the "gait period s" slider (or [ and ] keys, 0.05 s steps) is
+the time for one full stride, in real seconds (at sim speed 1.0).
+
+CURRENT LIMITING: what goes to the servos is rate-limited so the robot doesn't
+pull big current spikes (which brown out the supply / reset the Arduino):
+  * soft start  - when sending starts (or resumes after a pause / unreachable
+                  frame) the servos glide from where they are to the gait pose
+                  at SOFT_START_DEG_S instead of all 12 snapping there at once.
+  * speed limit - "max servo deg/s" caps how fast any servo is told to move.
+                  Fast moves = big acceleration = big current. If the gait asks
+                  for more than this (fast walk swings), the readout says
+                  SLEW-LIMITED; slow the gait down (longer cycle) instead.
+Lower current also comes from the gait itself: higher duty factor (more feet
+share the weight), longer cycle time, lower step height.
 """
 
 import argparse
 import math
+import os
+import threading
+from collections import deque
 import time
 
 import numpy as np
@@ -46,14 +74,22 @@ from leg_kinematics import fk_leg, leg_plane_to_3d, solver_to_hw
 from workspace import compute_workspace
 from arduino_link import ArduinoLink, add_cli_args
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CONFIG_PATH = "linkage_config.yaml"
+CFG = yaml.safe_load(open(CONFIG_PATH))
+CFG_LOADED = {"at": time.strftime("%H:%M:%S"), "mtime": os.path.getmtime(CONFIG_PATH)}
 BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
         ("C", "P2"), ("P1", "P2"), ("P1", "D")]
 COLORS = {"FL": "tab:blue", "FR": "tab:orange", "BL": "tab:green", "BR": "tab:purple"}
 FRAME_S = 1 / 30
-# free the arrow keys / r from matplotlib's default navigation shortcuts
-for _k in ("keymap.back", "keymap.forward", "keymap.home"):
-    plt.rcParams[_k] = [k for k in plt.rcParams[_k] if k not in ("left", "right", "r")]
+US_PER_DEG = 2000 / 270                 # servo pulse mapping: 0-270 deg -> 500-2500 us
+SOFT_START_DEG_S = 45                   # glide speed when sending (re)starts
+SETTLED_US = 10                         # soft start ends once every servo is this close
+OUT_HZ = 50                             # servo frames per second sent to the Arduino
+KEY_S = 0.04                            # longest gait sub-step between two waypoints
+MAX_TICK_S = 0.5                        # longer gaps (window dragged etc.) don't jump the gait
+# free the arrow keys / r / l from matplotlib's default navigation shortcuts
+for _k in ("keymap.back", "keymap.forward", "keymap.home", "keymap.yscale"):
+    plt.rcParams[_k] = [k for k in plt.rcParams[_k] if k not in ("left", "right", "r", "l")]
 
 ap = argparse.ArgumentParser(description="Gait simulator (+ optional Arduino output)")
 add_cli_args(ap)
@@ -72,7 +108,7 @@ WS = compute_workspace(CFG)[::3]
 state = {"playing": True, "pose": [0.0, 0.0, 0.0], "trail": [], "path": [],
          "was_stance": {leg: False for leg in LEGS}, "touch": {},
          "slip": {leg: 0.0 for leg in LEGS}, "last_wall": time.monotonic(),
-         "last_send": 0.0, "path_key": None}
+         "path_key": None, "tick_ema": FRAME_S}
 
 # ── layout ────────────────────────────────────────────────────────────────
 fig = plt.figure(figsize=(17, 9.5))
@@ -91,16 +127,18 @@ vmax = 150
 s_vx = slider(0.30, "vx fwd mm/s", -vmax, vmax, 40, 1)
 s_vy = slider(0.265, "vy left mm/s", -vmax, vmax, 0, 1)
 s_wz = slider(0.23, "turn deg/s", -60, 60, 0, 1)
-s_ct = slider(0.18, "cycle s", 0.3, 3.0, p0.cycle_time_s, 0.05)
-s_df = slider(0.145, "duty (0=dflt)", 0.0, 0.95, p0.duty_factor, 0.01)
-s_sh = slider(0.11, "step height mm", 0, 60, p0.step_height_mm, 1)
-s_st = slider(0.075, "stand height mm", 110, 185, p0.stand_height_mm, 1)
-s_sp = slider(0.025, "sim speed", 0.1, 2.0, 1.0, 0.05)
+s_ct = slider(0.195, "gait period s", 0.3, 5.0, p0.cycle_time_s, 0.05)
+s_df = slider(0.16, "duty (0=dflt)", 0.0, 0.95, p0.duty_factor, 0.01)
+s_sh = slider(0.125, "step height mm", 0, 60, p0.step_height_mm, 1)
+s_st = slider(0.09, "stand height mm", 110, 185, p0.stand_height_mm, 1)
+s_slew = slider(0.055, "max servo deg/s", 30, 400, 200, 5)
+s_sp = slider(0.02, "sim speed", 0.1, 2.0, 1.0, 0.05)
 
 radio = RadioButtons(fig.add_axes([0.50, 0.115, 0.10, 0.27]), list(GAITS),
                      active=list(GAITS).index(p0.gait))
 checks = CheckButtons(fig.add_axes([0.50, 0.01, 0.17, 0.10]),
-                      ["Play", "Step in place", "Send to Arduino"], [True, False, False])
+                      ["Play", "Step in place", "Send to Arduino", "Calibration view"],
+                      [True, False, False, False])
 
 # ── 3D artists ────────────────────────────────────────────────────────────
 leg_lines = {leg: [ax3d.plot([], [], [], "-", c=COLORS[leg], lw=2)[0] for _ in BARS]
@@ -198,6 +236,107 @@ def update_paths():
     state["path_bad"] = len(bad)
 
 
+def frame_pulses(res):
+    """All 12 channels' pulse widths (us) for one solved pose, via the same
+    compute_leg_us() the Arduino frames are built with."""
+    legs = CFG["legs"]
+    out = list(LINK.mgr._last_us)
+    for leg, r in res.items():
+        us = LINK.mgr.compute_leg_us(CFG, leg, r["theta1"], r["theta_c"], r["hip"])
+        for joint, ch in legs[leg]["channels"].items():
+            out[ch] = us[joint]
+    return out
+
+
+class Streamer(threading.Thread):
+    """
+    Plays queued waypoints (wall time, 12 pulses) to the Arduino at OUT_HZ,
+    linearly interpolating between the two waypoints around the playback time.
+    The speed limit / soft start are applied on top, using the real time
+    between frames.
+    """
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.lock = threading.Lock()
+        self.keys = deque()
+        self.active = False           # set by tick(): sending allowed right now
+        self.soft_start = True
+        self.slew_limited = False
+        self.error = None
+        self.sent = 0
+        self.underrun = False         # playback caught up with the newest waypoint
+
+    def push(self, t, pulses):
+        with self.lock:
+            self.keys.append((t, pulses))
+
+    def clear(self):
+        with self.lock:
+            self.keys.clear()
+        self.soft_start = True
+        self.slew_limited = False
+
+    def _sample(self, play_t):
+        """Linear interpolation of the waypoints at play_t (None if none queued)."""
+        with self.lock:
+            k = self.keys
+            if not k:
+                return None
+            while len(k) >= 2 and k[1][0] <= play_t:   # drop waypoints already passed
+                k.popleft()
+            if self.soft_start:
+                return list(k[-1][1])                  # glide to the newest pose first
+            t0, a = k[0]
+            if play_t <= t0 or len(k) == 1:
+                self.underrun = play_t > t0
+                return list(a)
+            t1, b = k[1]
+            self.underrun = False
+            u = (play_t - t0) / max(t1 - t0, 1e-6)
+            return [round(x + (y - x) * u) for x, y in zip(a, b)]
+
+    def run(self):
+        period = 1.0 / OUT_HZ
+        last = time.monotonic()
+        while True:
+            time.sleep(max(0.0, period - (time.monotonic() - last)))
+            now = time.monotonic()
+            dt, last = min(now - last, 0.1), now
+            if not (self.active and LINK.connected):
+                continue
+            delay = max(2 * state["tick_ema"], 2 * KEY_S)
+            target = self._sample(now - delay)
+            if target is None:
+                continue
+            mgr = LINK.mgr
+            deg_s = SOFT_START_DEG_S if self.soft_start else s_slew.val
+            step = max(1, int(deg_s * US_PER_DEG * dt))
+            held, out = False, []
+            for cur, want in zip(mgr._last_us, target):
+                d = max(-step, min(step, want - cur))
+                held |= d != want - cur
+                out.append(cur + d)
+            if out == mgr._last_us:
+                continue
+            try:
+                mgr._last_us[:] = out
+                mgr._transmit("gait_sim")
+                self.sent += 1
+            except Exception as e:
+                self.error = str(e)[:30]
+                self.active = False
+                mgr.disconnect()
+                continue
+            if self.soft_start and max(abs(a - b) for a, b in zip(out, target)) <= SETTLED_US:
+                self.soft_start = False
+            self.slew_limited = held and not self.soft_start
+
+
+STREAM = Streamer()
+STREAM.start()
+
+
 def reset(_=None):
     state.update(pose=[0.0, 0.0, 0.0], trail=[], path=[],
                  was_stance={leg: False for leg in LEGS}, touch={},
@@ -209,21 +348,37 @@ def reset(_=None):
 # ── main tick ─────────────────────────────────────────────────────────────
 def tick(_frame):
     now = time.monotonic()
-    wall = min(now - state["last_wall"], 0.1)
+    t_prev = state["last_wall"]
+    wall = min(now - t_prev, MAX_TICK_S)
     state["last_wall"] = now
+    state["tick_ema"] += 0.2 * (wall - state["tick_ema"])
     read_controls()
     playing = checks.get_status()[0]
+    want_send = checks.get_status()[2]
+    streaming = LINK.connected and want_send and playing
     dt = wall * s_sp.val if playing else 0.0
 
-    targets = GEN.step(dt) if dt > 0 else GEN.targets()
-    res = GEN.solve(targets)
-
-    # integrate body pose with the velocity actually used
-    vx, vy, wz = GEN.vel
+    # Step the gait in sub-steps of at most KEY_S. Each sub-step is a waypoint
+    # for the streamer (time-stamped at the wall time it belongs to); the last
+    # one is also what gets drawn.
+    n = max(1, math.ceil(dt / KEY_S)) if dt > 0 else 1
     x, y, th = state["pose"]
-    x += (vx * math.cos(th) - vy * math.sin(th)) * dt
-    y += (vx * math.sin(th) + vy * math.cos(th)) * dt
-    state["pose"] = [x, y, th + wz * dt]
+    bad = []
+    for k in range(1, n + 1):
+        sub = dt / n
+        targets = GEN.step(sub) if dt > 0 else GEN.targets()
+        res = GEN.solve(targets)
+        vx, vy, wz = GEN.vel                       # integrate body pose with the velocity used
+        x += (vx * math.cos(th) - vy * math.sin(th)) * sub
+        y += (vx * math.sin(th) + vy * math.cos(th)) * sub
+        th += wz * sub
+        bad = [leg for leg, r in res.items() if not r["valid"]]
+        if streaming and dt > 0:
+            if bad:
+                STREAM.clear()                    # never send it; glide back in after
+            else:
+                STREAM.push(now - wall + wall * k / n, frame_pulses(res))
+    state["pose"] = [x, y, th]
     if dt > 0:
         state["path"].append((x, y)); state["path"] = state["path"][-600:]
 
@@ -296,12 +451,15 @@ def tick(_frame):
     state["cursor"].set_xdata([GEN.phase, GEN.phase])
 
     # ---- Arduino
-    bad = [leg for leg, r in res.items() if not r["valid"]]
-    want_send = checks.get_status()[2]
     if LINK.enabled != want_send:
         LINK.set_enabled(want_send)
+    if streaming != STREAM.active:
+        if streaming:
+            STREAM.clear()                # fresh start: soft start, empty queue
+        STREAM.active = streaming
     if not LINK.connected:
-        ard = "ARDUINO: not connected"
+        ard = ("ARDUINO: not connected" if not STREAM.error
+               else f"ARDUINO: send failed, disconnected ({STREAM.error})")
     elif not want_send:
         ard = f"ARDUINO: {LINK.mgr.port_name} (sending off)"
     elif bad:
@@ -309,20 +467,16 @@ def tick(_frame):
     elif not playing:
         ard = f"ARDUINO: {LINK.mgr.port_name} paused"
     else:
-        ard = f"ARDUINO: {LINK.mgr.port_name} streaming"
-        if now - state["last_send"] >= 1.0 / GEN.p.update_rate_hz:
-            try:
-                LINK.mgr.send_legs(CFG, {leg: (r["theta1"], r["theta_c"], r["hip"])
-                                         for leg, r in res.items()})
-                state["last_send"] = now
-            except Exception as e:
-                LINK.mgr.disconnect()
-                ard = f"ARDUINO: send failed, disconnected ({str(e)[:30]})"
+        ard = (f"ARDUINO: {LINK.mgr.port_name} "
+               + ("soft start..." if STREAM.soft_start else f"streaming {OUT_HZ} Hz, interpolated")
+               + ("  SLEW-LIMITED" if STREAM.slew_limited else "")
+               + ("  UNDERRUN" if STREAM.underrun and not STREAM.soft_start else ""))
 
     # ---- text
     p = GEN.p
     lines = [
-        f"{p.gait.upper()}  duty {p.duty:.2f}  cycle {p.cycle_time_s:.2f}s  phase {GEN.phase:.2f}",
+        f"{p.gait.upper()}  duty {p.duty:.2f}  period {p.cycle_time_s:.2f}s  phase {GEN.phase:.2f}"
+        f"  ({1 / max(state['tick_ema'], 1e-3):.0f} fps)",
         f"vel  vx {vx:6.1f}  vy {vy:6.1f} mm/s  turn {math.degrees(wz):5.1f} deg/s"
         + ("  (LIMITED)" if GEN.limited else ""),
         f"max straight speed {GEN.max_speed_mm_s():.0f} mm/s  (max_step {p.max_step_mm:.0f} mm)",
@@ -344,13 +498,64 @@ def tick(_frame):
     ]
     for leg in LEGS:
         r, t = res[leg], targets[leg]
-        horn, thigh = solver_to_hw(r["theta1"], r["theta_c"])
+        horn, thigh = solver_to_hw(r["theta1"], r["theta_c"], CFG, leg)
         lines.append(f"{leg:3s} {t.phase:4.2f}  {'S' if t.stance else 's'}  {horn:6.1f} {thigh:6.1f} "
                      f"{r['hip']:5.1f} {state['slip'][leg]:5.1f}" + ("  UNREACH" if not r["valid"] else ""))
-    lines += ["", ard, "", "space play/pause  arrows drive  r reset"]
+    lines += ["", ard, "", "space play  arrows drive  r reset  [ ] period  l reload"]
+    size = 8.5
+    if checks.get_status()[3]:
+        lines, size = calibration_lines(res, ard), 7.5
     axtxt.clear(); axtxt.axis("off")
-    axtxt.text(0, 1, "\n".join(lines), va="top", family="monospace", fontsize=8.5)
+    axtxt.text(0, 1, "\n".join(lines), va="top", family="monospace", fontsize=size)
     return []
+
+
+def calibration_lines(res, ard):
+    """
+    Per leg and servo: the calibration points exactly as read from the config
+    (deg0 -> us0, deg1 -> us1), then the current hardware angle and the pulse
+    SerialManager.compute_leg_us() gives for it -- the same function that
+    builds the frame sent to the Arduino.
+    """
+    stale = os.path.getmtime(CONFIG_PATH) != CFG_LOADED["mtime"]
+    lines = [f"CALIBRATION  ({CONFIG_PATH} read {CFG_LOADED['at']}"
+             + (", FILE CHANGED SINCE - press l)" if stale else ")"),
+             f"frame: {CFG.get('calibration_frame', 'solver')}   "
+             "angle -> us is what would be sent", "",
+             "leg servo  ch  cal: deg0 -> us0   deg1 -> us1   now: deg  ->   us"]
+    for leg in LEGS:
+        lc, r = CFG["legs"][leg], res[leg]
+        horn, thigh = solver_to_hw(r["theta1"], r["theta_c"], CFG, leg)
+        us = LINK.mgr.compute_leg_us(CFG, leg, r["theta1"], r["theta_c"], r["hip"])
+        off = lc.get("offsets", {})
+        now = {"theta1": (horn, "horn", off.get("theta1_deg", 0.0)),
+               "theta_c": (thigh, "thigh", off.get("thetac_deg", 0.0)),
+               "hip": (r["hip"], "hip", off.get("hip_deg", 0.0))}
+        for i, joint in enumerate(("theta1", "theta_c", "hip")):
+            c = lc["calibration"][joint]
+            deg, name, o = now[joint]
+            lines.append(f"{leg if i == 0 else '':3s} {name:5s} {lc['channels'][joint]:3d}  "
+                         f"{c['deg0']:6.1f} -> {c['us0']:4d}  {c['deg1']:6.1f} -> {c['us1']:4d}"
+                         f"   {deg + o:6.1f} -> {us[joint]:4d}"
+                         + (f"  (incl. offset {o:+.1f})" if o else ""))
+        extra = [f"{k} {lc[k]:+g}" for k in ("x_forward_sign", "hip_dir", "horn_dir") if k in lc]
+        lines.append(f"    {'  '.join(extra)}" + ("   UNREACHABLE" if not r["valid"] else ""))
+    return lines + ["", ard + "      l = reload config from disk"]
+
+
+def reload_config():
+    """Re-read linkage_config.yaml in place (GEN, LINK and the solver share CFG).
+    Calibration, offsets and directions take effect at once; gait_gen params,
+    body size and the workspace plot keep their startup values."""
+    try:
+        new = yaml.safe_load(open(CONFIG_PATH))
+    except Exception as e:
+        print(f"Config reload failed, keeping the old one: {e}")
+        return
+    CFG.clear(); CFG.update(new)
+    CFG_LOADED.update(at=time.strftime("%H:%M:%S"), mtime=os.path.getmtime(CONFIG_PATH))
+    state["path_key"] = None
+    print(f"Reloaded {CONFIG_PATH} at {CFG_LOADED['at']}")
 
 
 def ground_z(targets):
@@ -394,6 +599,12 @@ def on_key(ev):
         s_wz.set_val(max(-60, s_wz.val - 5))
     elif ev.key == "r":
         reset()
+    elif ev.key == "l":
+        reload_config()
+    elif ev.key == "[":
+        s_ct.set_val(max(s_ct.valmin, round(s_ct.val - 0.05, 2)))
+    elif ev.key == "]":
+        s_ct.set_val(min(s_ct.valmax, round(s_ct.val + 0.05, 2)))
 
 
 radio.on_clicked(on_gait)

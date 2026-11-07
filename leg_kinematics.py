@@ -97,7 +97,22 @@ def calibration_frame(cfg: dict) -> str:
     return str(cfg.get("calibration_frame", "solver"))
 
 
-def solver_to_hw(theta1: float, theta_c: float) -> tuple[float, float]:
+def horn_dir(cfg: dict | None, leg: str | None) -> float:
+    """
+    legs.<leg>.horn_dir: which way the horn's HARDWARE angle counts (default +1).
+      +1 : 0 = level on the solver's -x, 90 = pointing UP   (-x -> +y)
+      -1 : 0 = level on the solver's -x, 90 = pointing DOWN (-x -> -y)
+    """
+    if cfg is None or leg is None:
+        return 1.0
+    v = float(cfg["legs"][leg].get("horn_dir", 1.0))
+    if v not in (1.0, -1.0):
+        raise ValueError(f"legs.{leg}.horn_dir must be 1 or -1, got {v}")
+    return v
+
+
+def solver_to_hw(theta1: float, theta_c: float,
+                 cfg: dict | None = None, leg: str | None = None) -> tuple[float, float]:
     """
     Solver-frame joint angles -> the HARDWARE frame the servos are calibrated in.
 
@@ -105,16 +120,19 @@ def solver_to_hw(theta1: float, theta_c: float) -> tuple[float, float]:
       theta1  = horn servo  (O -> A)
       theta_c = thigh servo (Q -> P1)
     Hardware frame (the 'Quadruped V1 Documentation' convention):
-      horn  (config key theta1):  0 = level, pointing back;    90 = pointing up
+      horn  (config key theta1):  0 = level, pointing back (solver -x);
+                                  90 = pointing up, or DOWN if the leg's
+                                  horn_dir is -1 (pass cfg + leg for that)
       thigh (config key theta_c): 0 = level, pointing forward; 90 = straight down
     Hip is the same in both frames (90 = leg hanging straight down).
     """
-    return _wrap180(180.0 - theta1), _wrap180(-theta_c)
+    return _wrap180(horn_dir(cfg, leg) * (180.0 - theta1)), _wrap180(-theta_c)
 
 
-def hw_to_solver(horn_hw: float, thigh_hw: float) -> tuple[float, float]:
+def hw_to_solver(horn_hw: float, thigh_hw: float,
+                 cfg: dict | None = None, leg: str | None = None) -> tuple[float, float]:
     """Inverse of solver_to_hw, returned inside the solver's input limits (theta1 in 90..360)."""
-    t1 = (180.0 - horn_hw) % 360.0
+    t1 = (180.0 - horn_dir(cfg, leg) * horn_hw) % 360.0
     return (t1 + 360.0 if t1 < 90.0 else t1), -thigh_hw
 
 

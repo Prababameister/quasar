@@ -10,6 +10,11 @@ Drag the sliders to move the target foot position. The real solver
   - right  : target, IK angles (theta1, theta_c, hip), FK check, servo pulses
 Pick the leg with the radio buttons.
 
+CALIBRATION CHECK: under each servo's angle -> us line, the readout shows that
+servo's two calibration points exactly as read from linkage_config.yaml, and
+the header says when the file was read. If you save the YAML while this is
+running it says FILE CHANGED; press  l  to re-read it.
+
 ARDUINO: if an Arduino running cobs_motor_prog.ino is plugged in, every
 slider move also sends the solved angles to that leg's servos. Untick
 "Send to Arduino" to stop sending. A pose is only sent when IK is valid and
@@ -40,6 +45,8 @@ Axes (leg-local, hip at origin), all in ROBOT terms:
 
 import argparse
 import math
+import os
+import time
 
 import numpy as np
 import yaml
@@ -53,7 +60,10 @@ from serial_manager import SERVO_MIN_US, SERVO_MAX_US
 from workspace import compute_workspace
 from arduino_link import ArduinoLink, add_cli_args
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CONFIG_PATH = "linkage_config.yaml"
+CFG = yaml.safe_load(open(CONFIG_PATH))
+CFG_LOADED = {"at": time.strftime("%H:%M:%S"), "mtime": os.path.getmtime(CONFIG_PATH)}
+plt.rcParams["keymap.yscale"] = [k for k in plt.rcParams["keymap.yscale"] if k != "l"]
 BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
         ("C", "P2"), ("P1", "P2"), ("P1", "D")]
 LIMITS = {i["name"]: (i.get("min_deg", -999), i.get("max_deg", 999)) for i in CFG["inputs"]}
@@ -103,7 +113,7 @@ send_box = CheckButtons(fig.add_axes([0.84, 0.10, 0.14, 0.06]), ["Send to Arduin
 
 def hw_angles(r):
     """Solver result -> hardware-frame angles (what the servos are calibrated in)."""
-    horn, thigh = solver_to_hw(r["theta1"], r["theta_c"])
+    horn, thigh = solver_to_hw(r["theta1"], r["theta_c"], CFG, r["leg"])
     return {"horn": horn, "thigh": thigh, "hip": r["hip"]}
 
 
@@ -170,17 +180,19 @@ def update(_=None):
     ax2d.set_aspect("equal"); ax2d.set_xlabel("X (robot front ->)")
     ax2d.set_title("Leg plane (2D linkage)"); ax2d.legend(loc="upper right", fontsize=8)
 
-    # ---- Y-Z: looking along the hip axis (front view), Y = outward from body
+    # ---- Y-Z: looking along the hip axis (front view), Y = robot Y (+left), so
+    # a left leg sits on +Y with the hip to its left, a right leg on -Y with the
+    # hip to its right
     def yz(p):
-        return s * p[1], p[2]
+        return p[1], p[2]
     h0 = np.array(yz(p3["H0"]))
     n0 = np.linalg.norm(h0)
     if n0 > 1e-9:
         u_bar = h0 / n0                           # hip axis -> leg plane
     else:                                         # hip_offset_mm = 0: use the leg's own rotation
         phi = math.radians(r["hip"] - float(CFG.get("hip_fixed_deg", 90.0)))
-        u_bar = np.array([math.cos(phi), math.sin(phi)])
-    u_leg = np.array([u_bar[1], -u_bar[0]])       # leg-plane "down", exactly 90 deg to the bar
+        u_bar = np.array([s * math.cos(phi), math.sin(phi)])
+    u_leg = s * np.array([u_bar[1], -u_bar[0]])   # leg-plane "down", exactly 90 deg to the bar
     for a, b in BARS:
         axyz.plot(*zip(yz(p3[a]), yz(p3[b])), "b-")
     axyz.plot([0, h0[0]], [0, h0[1]], "k-", lw=3, label="hip offset")
@@ -193,8 +205,8 @@ def update(_=None):
     axyz.scatter(*yz(foot), c="r", s=40, label="foot")
     axyz.scatter(*yz(want), c="g", marker="x", s=80, label="target")
     axyz.axhline(0, c="lightgray", lw=0.5); axyz.axvline(0, c="lightgray", lw=0.5)
-    axyz.set_xlim(-60, 160); axyz.set_ylim(-280, 80); axyz.set_aspect("equal")
-    axyz.set_xlabel("Y outward (mm)"); axyz.set_ylabel("Z (mm)")
+    axyz.set_xlim(*((-60, 160) if s > 0 else (-160, 60))); axyz.set_ylim(-280, 80); axyz.set_aspect("equal")
+    axyz.set_xlabel("Y (mm, + = robot left)"); axyz.set_ylabel("Z (mm)")
     axyz.set_title("Front view (Y-Z)"); axyz.legend(loc="upper right", fontsize=7)
     foot_dir = np.array(yz(foot)) - h0
     bar_leg_deg = math.degrees(math.atan2(abs(u_bar[1] * foot_dir[0] - u_bar[0] * foot_dir[1]),
@@ -216,11 +228,23 @@ def update(_=None):
     d = hw_angles(r)
     ch = CFG["legs"][leg]["channels"]
     us = LINK.mgr.compute_leg_us(CFG, leg, r["theta1"], r["theta_c"], r["hip"])  # exactly what is sent
+    lc = CFG["legs"][leg]
+    cal, off = lc["calibration"], lc.get("offsets", {})
+    stale = os.path.getmtime(CONFIG_PATH) != CFG_LOADED["mtime"]
+
+    def servo_lines(name, joint, deg, off_key):
+        c, o = cal[joint], float(off.get(off_key, 0.0))
+        return [f"  {name:6s} ch{ch[joint]:<2} {deg + o:7.2f} deg  -> {us[joint]:4d} us"
+                + (f"  (offset {o:+.1f})" if o else ""),
+                f"         cal {c['deg0']:6.1f} -> {c['us0']:4d}  {c['deg1']:6.1f} -> {c['us1']:4d}"]
+
     lines += [
-        "SERVO ANGLES (hardware frame)",
-        f"  thigh  ch{ch['theta_c']:<2} {d['thigh']:7.2f} deg  -> {us['theta_c']:4d} us",
-        f"  horn   ch{ch['theta1']:<2} {d['horn']:7.2f} deg  -> {us['theta1']:4d} us",
-        f"  hip    ch{ch['hip']:<2} {d['hip']:7.2f} deg  -> {us['hip']:4d} us",
+        f"SERVO ANGLES (hardware frame)",
+        f"  {CONFIG_PATH} read {CFG_LOADED['at']}  (l = reload)",
+        *(["  ** FILE CHANGED SINCE - press l to reload **"] if stale else []),
+        *servo_lines("thigh", "theta_c", d["thigh"], "thetac_deg"),
+        *servo_lines("horn", "theta1", d["horn"], "theta1_deg"),
+        *servo_lines("hip", "hip", d["hip"], "hip_deg"),
         f"  (solver: theta1 {r['theta1']:.1f}  theta_c {r['theta_c']:.1f})",
         "",
         f"IK valid: {r['valid']}   planar err {r['error_mm']:.2f} mm",
@@ -247,8 +271,27 @@ def update(_=None):
     lines += ["WARNINGS: " + ("none" if not warn else "")] + ["  - " + w for w in warn]
     lines += ["", LINK.send(leg, r["theta1"], r["theta_c"], r["hip"], blockers)]
 
-    axtxt.text(0, 1, "\n".join(lines), va="top", family="monospace", fontsize=9)
+    axtxt.text(0, 1, "\n".join(lines), va="top", family="monospace", fontsize=8.5)
     fig.canvas.draw_idle()
+
+
+def reload_config():
+    """Re-read linkage_config.yaml in place (LINK shares CFG), then redraw."""
+    try:
+        new = yaml.safe_load(open(CONFIG_PATH))
+    except Exception as e:
+        print(f"Config reload failed, keeping the old one: {e}")
+        return
+    CFG.clear(); CFG.update(new)
+    CFG_LOADED.update(at=time.strftime("%H:%M:%S"), mtime=os.path.getmtime(CONFIG_PATH))
+    print(f"Reloaded {CONFIG_PATH} at {CFG_LOADED['at']}")
+    LINK.set_enabled(LINK.enabled)       # resend the pose with the new calibration
+    update()
+
+
+def on_key(ev):
+    if ev.key == "l":
+        reload_config()
 
 
 def on_leg(label):
@@ -271,6 +314,7 @@ for sl in (s_x, s_y, s_z, s_h):
     sl.on_changed(update)
 radio.on_clicked(on_leg)
 mode_radio.on_clicked(on_mode)
+fig.canvas.mpl_connect("key_press_event", on_key)
 update()
 try:
     plt.show()
