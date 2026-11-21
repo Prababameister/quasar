@@ -81,7 +81,8 @@ legs:
     x_forward_sign: -1  # flipped 2026-11-05 after robot test (was -1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
     channels: {theta1: 3,  theta_c: 4,  hip: 5}  # ch3 = horn, ch4 = thigh (verified on robot 2026-11-12)
-    offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
+    offsets:  {theta1_deg: 12.0, thetac_deg: 0.0, hip_deg: 0.0}  # +horn raises the calf ~1.6 mm/deg; BL calf sat low; static trim, measured in air (2026-11-20)
+    height_trim_mm: 0.0  # gait foot-height trim, + raises the foot (moves thigh AND calf)
     calibration:
       theta1:  {deg0: 0.0,  us0: 1750, deg1: 90.0, us1: 1080}
       theta_c: {deg0: 0.0, us0: 1370, deg1: 90.0, us1: 680}

@@ -158,6 +158,11 @@ def side_sign(cfg: dict, leg: str) -> float:
     return 1.0 if leg_side(cfg, leg) == "left" else -1.0
 
 
+def height_trim_mm(cfg: dict, leg: str) -> float:
+    """Per-leg foot-height trim (legs.<leg>.height_trim_mm): + raises the foot."""
+    return float(cfg.get("legs", {}).get(leg, {}).get("height_trim_mm", 0.0) or 0.0)
+
+
 def hip_position(cfg: dict, leg: str, p: GaitParams) -> tuple[float, float]:
     """Hip axis position in the body frame (X front, Y left)."""
     fx = 1.0 if leg.upper().startswith("F") else -1.0
@@ -294,7 +299,7 @@ class GaitGenerator:
         return FootTarget(
             leg=leg, phase=lp, stance=stance, fwd=fwd, left=left, lift=lift,
             x=p.neutral_x_mm + x_forward_sign(self.cfg, leg) * fwd,
-            y=-p.stand_height_mm + lift,
+            y=-p.stand_height_mm + lift + height_trim_mm(self.cfg, leg),
             lateral=p.stance_width_mm + s_side * left,
         )
 
