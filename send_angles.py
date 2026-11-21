@@ -19,7 +19,7 @@ import yaml
 from arduino_link import ArduinoLink, add_cli_args
 from leg_kinematics import fk_leg, leg_names
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 LIMITS = {i["name"]: (i.get("min_deg", -999), i.get("max_deg", 999)) for i in CFG["inputs"]}
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

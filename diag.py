@@ -2,7 +2,7 @@ import random, yaml
 from workspace import compute_workspace
 from leg_kinematics import solve_leg
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 ws = compute_workspace(CFG)
 random.seed(0)
 for p in random.sample(ws, 80):

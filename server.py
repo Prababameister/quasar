@@ -137,17 +137,17 @@ def _replace_jump_points_in_yaml(text: str, points: dict) -> str:
 
 
 def _save_jump_points(points: dict) -> None:
-    text = CONFIG_PATH.read_text()
+    text = CONFIG_PATH.read_text(encoding="utf-8")
     new_text = _replace_jump_points_in_yaml(text, points)
     yaml.safe_load(new_text)  # validate before committing to disk
-    CONFIG_PATH.write_text(new_text)
+    CONFIG_PATH.write_text(new_text, encoding="utf-8")
 
 
 def _save_waypoints(waypoints: list) -> None:
-    text = CONFIG_PATH.read_text()
+    text = CONFIG_PATH.read_text(encoding="utf-8")
     new_text = _replace_waypoints_in_yaml(text, waypoints)
     yaml.safe_load(new_text)  # validate before committing to disk
-    CONFIG_PATH.write_text(new_text)
+    CONFIG_PATH.write_text(new_text, encoding="utf-8")
 
 # ── State ──────────────────────────────────────────────────────────────
 _cfg       = {}
@@ -157,7 +157,7 @@ _walker: WalkController | None = None
 
 def _load_config():
     global _cfg, _workspace, _walker
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         _cfg = yaml.safe_load(f)
     log.info("Config loaded — recomputing workspace…")
     _workspace = compute_workspace(_cfg)

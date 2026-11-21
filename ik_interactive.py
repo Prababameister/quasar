@@ -61,7 +61,7 @@ from workspace import compute_workspace
 from arduino_link import ArduinoLink, add_cli_args
 
 CONFIG_PATH = "linkage_config.yaml"
-CFG = yaml.safe_load(open(CONFIG_PATH))
+CFG = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 CFG_LOADED = {"at": time.strftime("%H:%M:%S"), "mtime": os.path.getmtime(CONFIG_PATH)}
 plt.rcParams["keymap.yscale"] = [k for k in plt.rcParams["keymap.yscale"] if k != "l"]
 BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
@@ -278,7 +278,7 @@ def update(_=None):
 def reload_config():
     """Re-read linkage_config.yaml in place (LINK shares CFG), then redraw."""
     try:
-        new = yaml.safe_load(open(CONFIG_PATH))
+        new = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
     except Exception as e:
         print(f"Config reload failed, keeping the old one: {e}")
         return

@@ -14,7 +14,7 @@ from serial_manager import SerialManager
 LEG = "FL"       # FL, FR, BL or BR
 PLOT = True
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 leg_cfg = CFG["legs"][LEG]
 
 

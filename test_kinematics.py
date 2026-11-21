@@ -15,7 +15,7 @@ from leg_kinematics import solve_leg, fk_leg, leg_names, calibration_frame, solv
 from gait import leg_direction, foot_offset, _gait_params, _PHASE_OFFSET
 from serial_manager import SerialManager, _deg_to_us, N_CHANNELS
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 
 _passed = 0
 _failed = 0
@@ -158,7 +158,7 @@ check("all 12 channels populated", all(500 <= v <= 2500 for v in us), us)
 # offset is actually applied
 mgr2 = SerialManager()
 fp2 = FakePort(); mgr2._port = fp2
-cfg2 = yaml.safe_load(open("linkage_config.yaml"))
+cfg2 = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 cfg2["legs"]["FL"]["offsets"]["theta1_deg"] = 12.0
 mgr2.send_legs(cfg2, {"FL": (150.0, -10.0, 90.0)})
 us2 = struct.unpack(">" + "H" * N_CHANNELS, cobs.decode(fp2.written[:-1]))

@@ -17,7 +17,7 @@ LEG = "FL"
 THETA1 = 150.0      # degrees, allowed 90..360
 THETA_C = -60.0     # degrees, allowed -90..180
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 
 try:
     p = fk_leg(CFG, LEG, THETA1, THETA_C)["points"]

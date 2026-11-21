@@ -1,7 +1,7 @@
 import yaml
 from leg_kinematics import solve_leg, solve_leg_3d
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 
 print("2D (walking) angles, hip fixed at 90:")
 for x, y in CFG["gait"]["waypoints"]:

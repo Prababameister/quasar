@@ -28,7 +28,7 @@ from leg_kinematics import (solve_leg, solve_leg_3d, fk_leg, leg_names,
                             hip_offset_mm)
 from workspace import compute_workspace
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 TOL_MM = 1.5
 MOUNT = {"FL": (100, 60), "BL": (-100, 60), "BR": (-100, -60), "FR": (100, -60)}
 

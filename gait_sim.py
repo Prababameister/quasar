@@ -75,7 +75,7 @@ from workspace import compute_workspace
 from arduino_link import ArduinoLink, add_cli_args
 
 CONFIG_PATH = "linkage_config.yaml"
-CFG = yaml.safe_load(open(CONFIG_PATH))
+CFG = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
 CFG_LOADED = {"at": time.strftime("%H:%M:%S"), "mtime": os.path.getmtime(CONFIG_PATH)}
 BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
         ("C", "P2"), ("P1", "P2"), ("P1", "D")]
@@ -548,7 +548,7 @@ def reload_config():
     Calibration, offsets and directions take effect at once; gait_gen params,
     body size and the workspace plot keep their startup values."""
     try:
-        new = yaml.safe_load(open(CONFIG_PATH))
+        new = yaml.safe_load(open(CONFIG_PATH, encoding="utf-8"))
     except Exception as e:
         print(f"Config reload failed, keeping the old one: {e}")
         return

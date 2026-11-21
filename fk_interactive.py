@@ -32,7 +32,7 @@ from leg_kinematics import fk_leg, leg_names, leg_side, hip_dir, hip_fixed_deg
 from workspace import compute_workspace
 from arduino_link import ArduinoLink, add_cli_args
 
-CFG = yaml.safe_load(open("linkage_config.yaml"))
+CFG = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
 BARS = [("O", "A"), ("A", "B"), ("Q", "B"), ("Q", "C"), ("Q", "P1"),
         ("C", "P2"), ("P1", "P2"), ("P1", "D")]
 LIMITS = {i["name"]: (i.get("min_deg", -999), i.get("max_deg", 999)) for i in CFG["inputs"]}

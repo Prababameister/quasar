@@ -443,7 +443,7 @@ def main():
     add_cli_args(ap)
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(open("linkage_config.yaml"))
+    cfg = yaml.safe_load(open("linkage_config.yaml", encoding="utf-8"))
     gen = GaitGenerator(cfg)
     if args.gait:
         gen.set_gait(args.gait)

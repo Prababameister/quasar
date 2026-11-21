@@ -45,11 +45,15 @@ import argparse
 import logging
 import math
 import os
-import select
 import sys
-import termios
 import time
-import tty
+
+if os.name == "nt":                 # Windows: no termios/tty, use the console API
+    import msvcrt
+else:
+    import select
+    import termios
+    import tty
 
 import yaml
 
@@ -203,9 +207,31 @@ def status_line(text: str) -> None:
     sys.stdout.flush()
 
 
+def read_keys_windows(timeout):
+    """Windows version of read_keys: poll the console for up to `timeout` s.
+    Arrow/function keys (prefixed by \\x00 or \\xe0) are dropped."""
+    keys = []
+    deadline = time.monotonic() + max(0.0, timeout)
+    while not msvcrt.kbhit():
+        if time.monotonic() >= deadline:
+            return keys
+        time.sleep(0.002)
+    while msvcrt.kbhit():
+        c = msvcrt.getwch()
+        if c in ("\x00", "\xe0"):          # special key: swallow its second code
+            msvcrt.getwch()
+            continue
+        if c == "\x03":                    # Ctrl-C arrives as a character here
+            raise KeyboardInterrupt
+        keys.append(c)
+    return keys
+
+
 def read_keys(fd, timeout):
     """All keys typed within `timeout` s. Arrow keys etc. (escape sequences) are
     dropped; a lone Esc comes back as "\\x1b"."""
+    if os.name == "nt":
+        return read_keys_windows(timeout)
     keys = []
     if not select.select([fd], [], [], max(0.0, timeout))[0]:
         return keys
@@ -240,7 +266,7 @@ def main() -> None:
     if not sys.stdin.isatty():
         sys.exit("stdin is not a terminal - run this from an interactive shell")
 
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     link = ArduinoLink(cfg)
     link.connect_from_args(args)          # also syncs channel values with the firmware's boot pose
@@ -250,12 +276,17 @@ def main() -> None:
     print()
 
     fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
+    if os.name == "nt":
+        os.system("")                     # turn on ANSI escapes for the status line
+        old_attrs = None                  # msvcrt reads keys unbuffered already
+    else:
+        old_attrs = termios.tcgetattr(fd)
     period = 1.0 / OUT_HZ
     quitting_at = None
     held = {"key": None, "seen": 0.0, "repeating": False}
     try:
-        tty.setcbreak(fd)
+        if old_attrs is not None:
+            tty.setcbreak(fd)
         last = time.monotonic()
         while True:
             for ch in read_keys(fd, period - (time.monotonic() - last)):
@@ -307,7 +338,8 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        if old_attrs is not None:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
         print("\nStopped.")
         link.close()
 
