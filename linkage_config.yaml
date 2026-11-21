@@ -90,7 +90,7 @@ legs:
     side: right
     x_forward_sign: -1  # flipped 2026-11-05 after robot test (was +1)
     hip_dir: -1        # was +1, but the foot moved inward on all legs (2026-11-05); flip back if it now moves inward
-    channels: {theta1: 7,  theta_c: 6,  hip: 8}
+    channels: {theta1: 6,  theta_c: 7,  hip: 8}  # ch6 = horn, ch7 = thigh (confirmed 2026-11-20)
     offsets:  {theta1_deg: 0.0, thetac_deg: 0.0, hip_deg: 0.0}
     calibration:
       theta1:  {deg0: 0,  us0: 1500, deg1: 90, us1: 2190}
