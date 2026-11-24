@@ -122,6 +122,10 @@ class GaitParams:
     jump_crouch_mm: float = 40.0      # feet pulled UP this far toward the body to load
     jump_extend_mm: float = 20.0      # feet pushed DOWN this far past stand height at takeoff
     jump_crouch_frac: float = 0.88    # fraction of ground time spent crouching (rest = a short, fast push)
+    # 1 -> walking gaits trace the gait.waypoints loop from linkage_config.yaml
+    # (see WaypointPath) instead of the cycloid; stand/step height and
+    # neutral_x are then taken from the loop. 0 -> parametric cycloid.
+    use_waypoints: float = 0.0
 
     @property
     def duty(self) -> float:
@@ -183,6 +187,63 @@ def _cycloid(s: float) -> tuple[float, float]:
     return s - math.sin(a) / (2.0 * math.pi), (1.0 - math.cos(a)) / 2.0
 
 
+class WaypointPath:
+    """
+    The hand-recorded gait.waypoints loop (canonical [x, y], mm) as a foot path.
+
+    The loop's lowest segment (smallest mean y) is the stance: its first point
+    is touchdown, its second lift-off. The rest of the loop, lift-off -> ... ->
+    touchdown, is the swing, walked at constant speed along its length.
+
+    Horizontal position is expressed as k, the fraction of the stance stroke
+    (-0.5 at touchdown, +0.5 at lift-off), so the generator can scale the
+    stroke to the commanded speed (no foot slip) while keeping the loop's
+    shape. At the speed whose stroke equals the recorded one, the foot traces
+    the waypoints exactly. Height above the stance line is kept as recorded.
+    """
+
+    def __init__(self, waypoints):
+        pts = [(float(x), float(y)) for x, y in waypoints]
+        n = len(pts)
+        if n < 3:
+            raise ValueError("gait.waypoints needs at least 3 points to form a loop")
+        i = min(range(n), key=lambda j: pts[j][1] + pts[(j + 1) % n][1])
+        self.touchdown, self.liftoff = pts[i], pts[(i + 1) % n]
+        self.stroke = self.liftoff[0] - self.touchdown[0]
+        if abs(self.stroke) < 1e-6:
+            raise ValueError("gait.waypoints stance segment (lowest one) has no horizontal length")
+        self.x_mid = (self.touchdown[0] + self.liftoff[0]) / 2
+        # swing polyline: lift-off -> following points -> touchdown (n points)
+        self.swing = [pts[(i + 1 + j) % n] for j in range(n)]
+        self.cum = [0.0]
+        for a, b in zip(self.swing, self.swing[1:]):
+            self.cum.append(self.cum[-1] + math.dist(a, b))
+
+    def k_of(self, x: float) -> float:
+        return (x - self.x_mid) / self.stroke
+
+    def y_line(self, k: float) -> float:
+        """Height of the stance line at stroke fraction k."""
+        return self.touchdown[1] + (k + 0.5) * (self.liftoff[1] - self.touchdown[1])
+
+    def ground_y(self) -> float:
+        return (self.touchdown[1] + self.liftoff[1]) / 2
+
+    def swing_point(self, s: float) -> tuple[float, float]:
+        """Point at fraction s (0 = lift-off, 1 = touchdown) of the swing's length."""
+        total = self.cum[-1]
+        if total <= 0:
+            return self.liftoff
+        d = min(max(s, 0.0), 1.0) * total
+        for j in range(len(self.cum) - 1):
+            if d <= self.cum[j + 1] or j == len(self.cum) - 2:
+                seg = self.cum[j + 1] - self.cum[j]
+                u = (d - self.cum[j]) / seg if seg > 0 else 0.0
+                (ax, ay), (bx, by) = self.swing[j], self.swing[j + 1]
+                return ax + (bx - ax) * u, ay + (by - ay) * u
+        return self.touchdown
+
+
 @dataclass
 class FootTarget:
     leg: str
@@ -213,6 +274,27 @@ class GaitGenerator:
         self.limited = False           # True if the command was scaled down to fit max_step
         self.step_in_place = False
         self.activity = 0.0            # 0 = standing still, 1 = full step height
+        self._wp_key = None
+        self._wp_path = None
+
+    # ── waypoint path ─────────────────────────────────────────────────
+    def waypoint_path(self) -> "WaypointPath | None":
+        """The gait.waypoints loop, re-read whenever the config's list changes."""
+        wp = (self.cfg.get("gait") or {}).get("waypoints") or []
+        key = tuple(tuple(float(v) for v in p) for p in wp)
+        if key != self._wp_key:
+            self._wp_key = key
+            self._wp_path = WaypointPath(key) if key else None
+        return self._wp_path
+
+    def using_waypoints(self) -> bool:
+        return bool(self.p.use_waypoints) and self.p.gait != "jump" \
+            and self.waypoint_path() is not None
+
+    def waypoint_speed_mm_s(self) -> float | None:
+        """Straight-line speed at which the stance stroke equals the recorded one."""
+        path = self.waypoint_path()
+        return abs(path.stroke) / self.p.stance_time_s if path else None
 
     # ── commands ──────────────────────────────────────────────────────
     def set_command(self, vx: float = 0.0, vy: float = 0.0, wz: float = 0.0,
@@ -246,15 +328,22 @@ class GaitGenerator:
     def _limit(self, vel) -> tuple[tuple, bool]:
         """Scale (vx, vy, wz) uniformly so no leg's stance stroke exceeds max_step_mm."""
         t = self.p.stance_time_s
+        cap = self.max_step_mm()
         worst = max(math.hypot(*self._leg_velocity(leg, vel)) * t for leg in self.legs)
-        if worst <= self.p.max_step_mm or worst == 0:
+        if worst <= cap or worst == 0:
             return tuple(vel), False
-        k = self.p.max_step_mm / worst
+        k = cap / worst
         return tuple(v * k for v in vel), True
+
+    def max_step_mm(self) -> float:
+        """Stroke cap: max_step_mm, but never shorter than a recorded waypoint stroke."""
+        if self.using_waypoints():
+            return max(self.p.max_step_mm, abs(self.waypoint_path().stroke))
+        return self.p.max_step_mm
 
     def max_speed_mm_s(self) -> float:
         """Top straight-line speed with the current parameters."""
-        return self.p.max_step_mm / self.p.stance_time_s
+        return self.max_step_mm() / self.p.stance_time_s
 
     # ── time ──────────────────────────────────────────────────────────
     def step(self, dt: float) -> dict[str, FootTarget]:
@@ -287,6 +376,24 @@ class GaitGenerator:
         # k = +0.5 at lift-off (foot behind). Swing runs k back from +0.5 to -0.5.
         dx, dy = -ux * p.stance_time_s, -uy * p.stance_time_s
         duty = p.duty
+        s_side = side_sign(self.cfg, leg)
+        trim = height_trim_mm(self.cfg, leg)
+        if self.using_waypoints():
+            path = self.waypoint_path()
+            if lp < duty:
+                k, stance = lp / duty - 0.5, True
+                lift = 0.0
+            else:
+                wx, wy = path.swing_point((lp - duty) / (1.0 - duty))
+                k, stance = path.k_of(wx), False
+                lift = (wy - path.y_line(k)) * self.activity
+            fwd, left = k * dx, k * dy
+            return FootTarget(
+                leg=leg, phase=lp, stance=stance, fwd=fwd, left=left, lift=lift,
+                x=path.x_mid + x_forward_sign(self.cfg, leg) * fwd,
+                y=path.y_line(k) + lift + trim,
+                lateral=p.stance_width_mm + s_side * left,
+            )
         if p.gait == "jump":
             k, lift, stance = self._jump_profile(lp)
         elif lp < duty:
@@ -295,11 +402,10 @@ class GaitGenerator:
             h, v = _cycloid((lp - duty) / (1.0 - duty))
             k, lift, stance = 0.5 - h, p.step_height_mm * self.activity * v, False
         fwd, left = k * dx, k * dy
-        s_side = side_sign(self.cfg, leg)
         return FootTarget(
             leg=leg, phase=lp, stance=stance, fwd=fwd, left=left, lift=lift,
             x=p.neutral_x_mm + x_forward_sign(self.cfg, leg) * fwd,
-            y=-p.stand_height_mm + lift + height_trim_mm(self.cfg, leg),
+            y=-p.stand_height_mm + lift + trim,
             lateral=p.stance_width_mm + s_side * left,
         )
 

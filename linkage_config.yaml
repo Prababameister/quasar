@@ -122,11 +122,11 @@ gait:
   update_rate_hz:   30      # servo command rate while walking
   forward_axis_sign: 1      # +1 if the recorded loop order is robot-forward; flip if it walks backward
   waypoints:                # canonical-frame [x, y] loop, in mm (must be reachable)
-    - [14.818, -170.029]
-    - [10.629, -150.203]
-    - [-1.939, -138.105]
-    - [-21.489, -150.203]
-    - [-25.678, -167.486]
+    - [23.043, -171.221]
+    - [23.043, -122.03]
+    - [-2.143, -77.037]
+    - [-32.925, -116.839]
+    - [-38.522, -172.215]
   lateral_scale: 1.0   # mm of sideways foot travel per mm of recorded x travel
   strafe_sign: 1       # flip to -1 if strafing goes the wrong way
 

@@ -22,7 +22,11 @@ Panels
 
 Controls: gait type (strafe_left / strafe_right turn the vx slider into sideways
 speed), body speed (vx fwd, vy left, turn), cycle time, duty factor
-(0 = gait default), step height, stand height, sim speed. Keyboard:
+(0 = gait default), step height, stand height, sim speed.
+"Config waypoints" (on by default) makes the walking gaits trace the
+gait.waypoints loop from linkage_config.yaml: the stride scales with speed and
+the vx slider starts at the speed that traces the loop exactly; step height,
+stand height are then taken from the loop (their sliders do nothing). Keyboard:
   space = play/pause   arrows = drive (up/down vx, left/right turn)   r = reset
   [ / ] = gait period -/+ 0.05 s
 
@@ -99,6 +103,7 @@ LINK.connect_from_args(args)
 LINK.set_enabled(False)                 # never start walking the real robot by surprise
 
 GEN = GaitGenerator(CFG)
+GEN.p.use_waypoints = 1.0 if GEN.waypoint_path() else 0.0   # trace gait.waypoints by default
 LEGS = GEN.legs
 
 print("Computing workspace (a few seconds)...")
@@ -124,7 +129,9 @@ def slider(y, label, lo, hi, v, step=None):
     return Slider(fig.add_axes([0.08, y, 0.36, 0.022]), label, lo, hi, valinit=v, valstep=step)
 
 vmax = 150
-s_vx = slider(0.30, "vx fwd mm/s", -vmax, vmax, 40, 1)
+# with waypoints on, start at the speed whose stride equals the recorded loop's
+_wp_v = GEN.waypoint_speed_mm_s() if GEN.using_waypoints() else None
+s_vx = slider(0.30, "vx fwd mm/s", -vmax, vmax, min(vmax, round(_wp_v)) if _wp_v else 40, 1)
 s_vy = slider(0.265, "vy left mm/s", -vmax, vmax, 0, 1)
 s_wz = slider(0.23, "turn deg/s", -60, 60, 0, 1)
 s_ct = slider(0.195, "gait period s", 0.3, 5.0, p0.cycle_time_s, 0.05)
@@ -137,8 +144,9 @@ s_sp = slider(0.02, "sim speed", 0.1, 2.0, 1.0, 0.05)
 radio = RadioButtons(fig.add_axes([0.50, 0.115, 0.10, 0.27]), list(GAITS),
                      active=list(GAITS).index(p0.gait))
 checks = CheckButtons(fig.add_axes([0.50, 0.01, 0.17, 0.10]),
-                      ["Play", "Step in place", "Send to Arduino", "Calibration view"],
-                      [True, False, False, False])
+                      ["Play", "Step in place", "Send to Arduino", "Calibration view",
+                       "Config waypoints"],
+                      [True, False, False, False, bool(GEN.p.use_waypoints)])
 
 # ── 3D artists ────────────────────────────────────────────────────────────
 leg_lines = {leg: [ax3d.plot([], [], [], "-", c=COLORS[leg], lw=2)[0] for _ in BARS]
@@ -177,8 +185,13 @@ axleg.set_title("Foot paths, leg plane (canonical frame)", fontsize=9)
 
 def zoom_leg_plane():
     p = GEN.p
-    axleg.set_xlim(p.neutral_x_mm - 110, p.neutral_x_mm + 110)
-    axleg.set_ylim(-p.stand_height_mm - 40, -p.stand_height_mm + 90)
+    if GEN.using_waypoints():
+        path = GEN.waypoint_path()
+        cx, gy = path.x_mid, path.ground_y()
+    else:
+        cx, gy = p.neutral_x_mm, -p.stand_height_mm
+    axleg.set_xlim(cx - 110, cx + 110)
+    axleg.set_ylim(gy - 40, gy + 90)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -202,6 +215,7 @@ def read_controls():
     p.duty_factor = s_df.val
     p.step_height_mm = s_sh.val
     p.stand_height_mm = s_st.val
+    p.use_waypoints = 1.0 if checks.get_status()[4] else 0.0
     GEN.set_command(s_vx.val, s_vy.val, math.radians(s_wz.val),
                     step_in_place=checks.get_status()[1])
 
@@ -221,7 +235,7 @@ def update_paths():
     """Redraw the one-cycle foot paths when velocity / params change."""
     p = GEN.p
     key = (tuple(round(v, 1) for v in GEN.vel), p.gait, p.duty, p.step_height_mm,
-           p.stand_height_mm, round(GEN.activity, 2))
+           p.stand_height_mm, round(GEN.activity, 2), p.use_waypoints, GEN._wp_key)
     if key == state["path_key"]:
         return
     state["path_key"] = key
@@ -479,7 +493,7 @@ def tick(_frame):
         f"  ({1 / max(state['tick_ema'], 1e-3):.0f} fps)",
         f"vel  vx {vx:6.1f}  vy {vy:6.1f} mm/s  turn {math.degrees(wz):5.1f} deg/s"
         + ("  (LIMITED)" if GEN.limited else ""),
-        f"max straight speed {GEN.max_speed_mm_s():.0f} mm/s  (max_step {p.max_step_mm:.0f} mm)",
+        f"max straight speed {GEN.max_speed_mm_s():.0f} mm/s  (max_step {GEN.max_step_mm():.0f} mm)",
         f"feet down {len(stance_pts)}   stability margin "
         + (f"{margin:6.1f} mm" if math.isfinite(margin) else "  none (airborne)")
         + ("  STABLE" if margin > 0 else "  not static-stable"),
@@ -565,6 +579,8 @@ def ground_z(targets):
     air, drops away by the ballistic rise of the body after takeoff.
     """
     p = GEN.p
+    if GEN.using_waypoints():
+        return GEN.waypoint_path().ground_y()
     if p.gait != "jump":
         return -p.stand_height_mm
     if any(t.stance for t in targets.values()):
